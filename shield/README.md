@@ -1,17 +1,21 @@
 # Shield: Cost-Aware Reverse Proxy with Admission Control
 
-FastAPI-based reverse proxy implementing, in order (see CLAUDE.md):
-
-**(A) Token-budget admission control** — rejects requests based on their *estimated
-cost* (prompt tokens + requested output tokens), not just request count. This is what
-catches Profile D (`/loadgen/profiles/profile-d.js`): few requests/sec, each one huge.
-Legitimate and non-priority traffic draw from separate cost budgets so one can't starve
-the other.
+FastAPI-based reverse proxy implementing three defense mechanisms (see CLAUDE.md),
+applied at runtime in the order **B -> A -> C** — queue-shedding runs first so a
+shed request never has its token cost deducted (it never reaches llama-server, so
+charging it would drain the budget for nothing and skew probe-cohort survival numbers
+under sustained load):
 
 **(B) Queue-aware load shedding** — polls `llamacpp:requests_deferred` from
 llama-server's `/metrics` (cached, not per-request) and short-circuits with `503`
 before the real server's queue backs up. Falls back to the authoritative
 `/slots?fail_on_no_slot=1` check when the deferred count looks borderline.
+
+**(A) Token-budget admission control** — rejects requests based on their *estimated
+cost* (prompt tokens + requested output tokens), not just request count. This is what
+catches Profile D (`/loadgen/profiles/profile-d.js`): few requests/sec, each one huge.
+Legitimate and non-priority traffic draw from separate cost budgets so one can't starve
+the other. Only runs once (B) has already confirmed llama-server can take the request.
 
 **(C) Priority-tiered fair queuing** — `X-Priority: legitimate` traffic gets its own,
 larger token budget and a higher shedding threshold, so attack traffic sharing the

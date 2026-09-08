@@ -3,17 +3,20 @@ Shield: FastAPI reverse proxy implementing cost-aware admission control.
 
 Reads LLAMA_SERVER_URL from environment (required).
 
-Defense pipeline, applied in order (see CLAUDE.md):
-  (A) Token-budget check — rejects requests whose ESTIMATED COST (prompt tokens +
-      requested output tokens) would blow the caller's budget. This is what catches
-      Profile D (few requests/sec, each one huge) that a plain request-counter misses.
+Defense mechanisms (see CLAUDE.md), applied at RUNTIME in the order B -> A -> C —
+queue-shedding runs first so a request that gets shed never has its token cost
+deducted (it never reaches llama-server, so charging it would drain the budget for
+nothing and skew probe-cohort survival numbers under sustained load):
   (B) Queue-aware shedding — watches llamacpp:requests_deferred (scraped from
       llama-server's own /metrics) and short-circuits with 503 before the real
       server's queue backs up, using /slots?fail_on_no_slot=1 as the authoritative
       "is there a slot" check.
+  (A) Token-budget check — rejects requests whose ESTIMATED COST (prompt tokens +
+      requested output tokens) would blow the caller's budget. This is what catches
+      Profile D (few requests/sec, each one huge) that a plain request-counter misses.
   (C) Priority-tiered fair queuing — "legitimate" traffic (X-Priority: legitimate)
-      draws from its own reserved token budget so attack traffic sharing the same
-      wire cannot starve it.
+      draws from its own reserved token budget and a higher shed threshold so attack
+      traffic sharing the same wire cannot starve it.
 
 Listens on http://localhost:9090 by default.
 """
@@ -256,18 +259,12 @@ async def forward_request(request: Request) -> JSONResponse:
         logger.info(f"[PASSTHROUGH] {request.method} {request.url.path} priority={priority}")
         return await _do_forward(request, body)
 
-    # (A) Cost-aware token budget
-    prompt_cost, output_cost = estimate_request_cost(body)
-    cost = prompt_cost + output_cost
-    bucket = legitimate_bucket if priority else default_bucket
-    if not bucket.consume(cost):
-        # Rejected requests (429/503) never reach llama-server, so there's nothing
-        # to reconcile an estimate against — this is intentional, not a gap.
-        logger.warning(f"Token budget exceeded (cost={cost}, priority={priority}); rejecting")
-        return JSONResponse({"error": "Token budget exceeded", "estimated_cost": cost}, status_code=429)
-
-    # (B) Queue-aware shedding — check the deferred gauge first (cheap, cached),
-    # fall back to the authoritative /slots check only when it looks tight.
+    # (B) Queue-aware shedding runs BEFORE the token budget so a request that gets
+    # shed here never touches the bucket — otherwise it's charged for a request
+    # that never reaches llama-server, draining the budget faster than it should
+    # and skewing probe-cohort survival numbers under sustained load. Check the
+    # deferred gauge first (cheap, cached), fall back to the authoritative /slots
+    # check only when it looks tight.
     deferred = await get_requests_deferred()
     shed_threshold = (
         settings.deferred_shed_threshold_legitimate if priority
@@ -282,6 +279,18 @@ async def forward_request(request: Request) -> JSONResponse:
         # Rejected before reaching llama-server — nothing to reconcile, same as above.
         logger.warning(f"No slot available on llama-server (priority={priority}); shedding")
         return JSONResponse({"error": "No slots available"}, status_code=503)
+
+    # (A) Cost-aware token budget — only reached once queue-shedding has already
+    # confirmed llama-server can actually take this request, so a shed request
+    # never touches the bucket.
+    prompt_cost, output_cost = estimate_request_cost(body)
+    cost = prompt_cost + output_cost
+    bucket = legitimate_bucket if priority else default_bucket
+    if not bucket.consume(cost):
+        # Rejected requests (429/503) never reach llama-server, so there's nothing
+        # to reconcile an estimate against — this is intentional, not a gap.
+        logger.warning(f"Token budget exceeded (cost={cost}, priority={priority}); rejecting")
+        return JSONResponse({"error": "Token budget exceeded", "estimated_cost": cost}, status_code=429)
 
     # (C) Admitted — priority only affected which bucket/threshold was used above;
     # forwarding itself is FIFO on llama-server's own scheduler. This is the only

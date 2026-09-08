@@ -1,8 +1,8 @@
 # LLM Inference Service Availability Defense Prototype
 
-A defensive prototype for hardening LLM inference services against availability and DoS stress (OWASP LLM10:2025). Built on [llama.cpp](https://github.com/ggerganov/llama.cpp) (llama-server), running CPU-only on laptops. Server and load-generator laptops connect over a phone hotspot during scheduled sessions.
+A defensive prototype for hardening LLM inference services against availability and DoS stress (OWASP LLM10:2025). Built on [llama.cpp](https://github.com/ggerganov/llama.cpp) (llama-server), running CPU-only on laptops. Server and load-generator laptops connect over the same network during scheduled sessions.
 
-**Note:** This is a 4-day hackathon project. Infrastructure is ephemeral; server/load-gen machines join via phone hotspot for short sessions. No fixed IPs or permanent connections assumed.
+**Note:** This is a 4-day hackathon project. Infrastructure is ephemeral; server/load-gen machines join via same network for short sessions. No fixed IPs or permanent connections assumed.
 
 ## Architecture
 
@@ -20,17 +20,17 @@ A defensive prototype for hardening LLM inference services against availability 
 └──────────────────┼──────────────────────────────────────────────────┘
                    │
                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ Shield Proxy (FastAPI)                                              │
+┌────────────────────────────────────────────────────────────────────┐
+│ Shield Proxy (FastAPI)                                             │
 │ Reads LLAMA_SERVER_URL from env (points to llama-server)           │
-│                                                                     │
+│                                                                    │
 │   ┌──────────────────────────────────────────────────────────────┐ │
 │   │ Token-bucket admission control                               │ │
 │   │ Queue-aware load shedding (llamacpp:requests_deferred,       │ │
 │   │   /slots?fail_on_no_slot=1)                                  │ │
 │   │ Priority-tiered fair queuing                                 │ │
 │   └────────────────┬─────────────────────────────────────────────┘ │
-│                    │ (forwarded HTTP)                               │
+│                    │ (forwarded HTTP)                              │
 └────────────────────┼───────────────────────────────────────────────┘
                      │
                      ▼
@@ -40,11 +40,11 @@ A defensive prototype for hardening LLM inference services against availability 
 │ /metrics endpoint                                                   │
 │                                                                     │
 │   Key metrics:                                                      │
-│   - llamacpp:requests_deferred (queue depth)                       │
-│   - llamacpp:slots_* (slot usage)                                  │
-│   - llamacpp:prompt_tokens_* (processing metrics)                  │ 
+│   - llamacpp:requests_deferred (queue depth)                        │
+│   - llamacpp:slots_* (slot usage)                                   │
+│   - llamacpp:prompt_tokens_* (processing metrics)                   │ 
 │                                                                     │
-│   Config: --metrics -np/-t/-c flags pinned in service/start.sh     │
+│   Config: --metrics -np/-t/-c flags pinned in service/start.sh      │
 └────────────────────┬────────────────────────────────────────────────┘
                      │
                      ▼
@@ -52,13 +52,13 @@ A defensive prototype for hardening LLM inference services against availability 
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Analysis Scripts (Python)                                            │
+│ Analysis Scripts (Python)                                           │
 │                                                                     │
-│   - Bootstrap CI for latency percentiles                           │
-│   - Wilson CI for proportions (error rates, success %)             │
-│   - Chart generation from raw CSVs                                 │
-│   - Session drift & thermal-drift detection                        │
-│   - Cross-session consistency checks                               │
+│   - Bootstrap CI for latency percentiles                            │
+│   - Wilson CI for proportions (error rates, success %)              │
+│   - Chart generation from raw CSVs                                  │
+│   - Session drift & thermal-drift detection                         │
+│   - Cross-session consistency checks                                │
 └─────────────────────────────────────────────────────────────────────┘
 
 Results stored in /results/*.csv (gitignored except .gitkeep)

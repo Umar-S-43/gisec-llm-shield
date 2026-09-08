@@ -20,9 +20,12 @@ Listens on http://localhost:9090 by default.
 
 import os
 import re
+import csv
 import time
 import logging
 import httpx
+from pathlib import Path
+from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic_settings import BaseSettings
@@ -80,13 +83,13 @@ def estimate_tokens(text: str) -> int:
     return max(1, int(len(text.split()) / 0.75))
 
 
-def estimate_request_cost(body: bytes) -> int:
-    """Estimate prompt tokens + requested output tokens from a completion/chat payload."""
+def estimate_request_cost(body: bytes) -> tuple[int, int]:
+    """Estimate (prompt_cost, output_cost) from a completion/chat payload, in cost units."""
     import json
     try:
         payload = json.loads(body)
     except Exception:
-        return 1  # unparsable body; charge the minimum rather than failing open expensively
+        return (1, 0)  # unparsable body; charge the minimum rather than failing open expensively
 
     prompt_text = payload.get("prompt", "")
     if not prompt_text and "messages" in payload:
@@ -95,7 +98,7 @@ def estimate_request_cost(body: bytes) -> int:
     prompt_cost = estimate_tokens(prompt_text)
     output_cost = int(payload.get("n_predict") or payload.get("max_tokens") or 128)
 
-    return prompt_cost + output_cost
+    return (prompt_cost, output_cost)
 
 
 # --- Token bucket (cost-aware) ----------------------------------------------
@@ -174,6 +177,68 @@ async def slot_available() -> bool:
         return True  # optimistic fail-open if llama-server is briefly unreachable
 
 
+# --- Estimate-vs-actual reconciliation (log-only, no bucket feedback) ------
+# One CSV per Shield process start, session-tagged the same way the rest of the
+# repo tags run output (results/<thing>_<timestamp>.csv). This is a diagnostic
+# log for building an error-distribution report later — it deliberately does NOT
+# feed back into the token bucket (no retroactive refund/charge), so it can't
+# change admission behavior mid-run and bias a comparison.
+
+_RECONCILIATION_CSV_PATH = Path("results") / f"shield_reconciliation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+_RECONCILIATION_HEADERS = [
+    "timestamp", "priority",
+    "prompt_tokens_estimated", "output_tokens_estimated", "total_estimated",
+    "prompt_tokens_actual", "completion_tokens_actual", "total_actual",
+    "signed_error", "relative_error_pct",
+]
+
+
+def _log_reconciliation(priority: bool, prompt_cost: int, output_cost: int, response_json) -> None:
+    """
+    Compare estimated cost against llama-server's reported usage for an ADMITTED
+    request. Log-only: never adjusts the token bucket.
+
+    NOT VERIFIED against a live server: llama-server's native /completion endpoint
+    (what every current loadgen script calls) is not confirmed to return an
+    OpenAI-style `usage: {prompt_tokens, completion_tokens}` object — the
+    OpenAI-compatible endpoints (/v1/completions, /v1/chat/completions) are the
+    ones documented to. If `usage` is absent here, that may be why; verify against
+    your actual server rather than assuming this silently "isn't working."
+    """
+    if not isinstance(response_json, dict):
+        logger.warning("Reconciliation skipped: response body was not JSON (streaming response or non-JSON error body?)")
+        return
+
+    usage = response_json.get("usage")
+    if not isinstance(usage, dict) or "prompt_tokens" not in usage or "completion_tokens" not in usage:
+        logger.warning(
+            "Reconciliation skipped: response JSON had no usable 'usage.prompt_tokens'/'usage.completion_tokens'. "
+            "See _log_reconciliation docstring — this endpoint may not report usage the way this code expects."
+        )
+        return
+
+    prompt_actual = usage["prompt_tokens"]
+    completion_actual = usage["completion_tokens"]
+    total_estimated = prompt_cost + output_cost
+    total_actual = prompt_actual + completion_actual
+    signed_error = total_actual - total_estimated
+    relative_error_pct = (signed_error / total_estimated * 100) if total_estimated else None
+
+    is_new_file = not _RECONCILIATION_CSV_PATH.exists()
+    _RECONCILIATION_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_RECONCILIATION_CSV_PATH, "a", newline="") as f:
+        writer = csv.writer(f)
+        if is_new_file:
+            writer.writerow(_RECONCILIATION_HEADERS)
+        writer.writerow([
+            datetime.now(timezone.utc).isoformat(),
+            "legitimate" if priority else "default",
+            prompt_cost, output_cost, total_estimated,
+            prompt_actual, completion_actual, total_actual,
+            signed_error, f"{relative_error_pct:.2f}" if relative_error_pct is not None else "",
+        ])
+
+
 # --- Request pipeline --------------------------------------------------------
 
 async def forward_request(request: Request) -> JSONResponse:
@@ -181,14 +246,18 @@ async def forward_request(request: Request) -> JSONResponse:
     priority = is_priority_request(request)
 
     if not settings.shield_active:
-        # Day-1 / defense-off mode: pass everything through, just log.
+        # Day-1 / defense-off mode: pass everything through, just log. No cost was
+        # estimated for this request, so there is nothing to reconcile against.
         logger.info(f"[PASSTHROUGH] {request.method} {request.url.path} priority={priority}")
         return await _do_forward(request, body)
 
     # (A) Cost-aware token budget
-    cost = estimate_request_cost(body)
+    prompt_cost, output_cost = estimate_request_cost(body)
+    cost = prompt_cost + output_cost
     bucket = legitimate_bucket if priority else default_bucket
     if not bucket.consume(cost):
+        # Rejected requests (429/503) never reach llama-server, so there's nothing
+        # to reconcile an estimate against — this is intentional, not a gap.
         logger.warning(f"Token budget exceeded (cost={cost}, priority={priority}); rejecting")
         return JSONResponse({"error": "Token budget exceeded", "estimated_cost": cost}, status_code=429)
 
@@ -200,19 +269,28 @@ async def forward_request(request: Request) -> JSONResponse:
         else settings.deferred_shed_threshold_default
     )
     if deferred >= shed_threshold:
+        # Rejected before reaching llama-server — nothing to reconcile, same as above.
         logger.warning(f"Shedding load: requests_deferred={deferred} >= threshold={shed_threshold} priority={priority}")
         return JSONResponse({"error": "Service overloaded", "requests_deferred": deferred}, status_code=503)
 
     if not await slot_available():
+        # Rejected before reaching llama-server — nothing to reconcile, same as above.
         logger.warning(f"No slot available on llama-server (priority={priority}); shedding")
         return JSONResponse({"error": "No slots available"}, status_code=503)
 
     # (C) Admitted — priority only affected which bucket/threshold was used above;
-    # forwarding itself is FIFO on llama-server's own scheduler.
-    return await _do_forward(request, body)
+    # forwarding itself is FIFO on llama-server's own scheduler. This is the only
+    # path where a cost estimate was actually made AND the request reached
+    # llama-server, so it's the only path we reconcile.
+    return await _do_forward(request, body, reconcile=(prompt_cost, output_cost), priority=priority)
 
 
-async def _do_forward(request: Request, body: bytes) -> JSONResponse:
+async def _do_forward(
+    request: Request,
+    body: bytes,
+    reconcile: tuple[int, int] | None = None,
+    priority: bool = False,
+) -> JSONResponse:
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -222,9 +300,19 @@ async def _do_forward(request: Request, body: bytes) -> JSONResponse:
                 timeout=60.0,
             )
             try:
-                return JSONResponse(response.json(), status_code=response.status_code)
+                parsed = response.json()
             except Exception:
+                # Non-JSON body — e.g. a streaming (SSE) response, if one is ever sent.
+                # No loadgen script sends stream:true today, so this path is untested;
+                # flagging rather than silently coercing it into something reconcilable.
+                if reconcile is not None:
+                    _log_reconciliation(priority, reconcile[0], reconcile[1], None)
                 return JSONResponse({"raw": response.text}, status_code=response.status_code)
+
+            if reconcile is not None and response.status_code == 200:
+                _log_reconciliation(priority, reconcile[0], reconcile[1], parsed)
+
+            return JSONResponse(parsed, status_code=response.status_code)
     except Exception as e:
         logger.error(f"Proxy error: {e}")
         return JSONResponse({"error": "Internal proxy error"}, status_code=500)

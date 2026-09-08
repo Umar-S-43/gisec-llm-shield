@@ -1,25 +1,47 @@
 # Shield: Cost-Aware Reverse Proxy with Admission Control
 
-FastAPI-based reverse proxy implementing three defense mechanisms (see CLAUDE.md),
-applied at runtime in the order **B -> A -> C** — queue-shedding runs first so a
-shed request never has its token cost deducted (it never reaches llama-server, so
-charging it would drain the budget for nothing and skew probe-cohort survival numbers
-under sustained load):
+FastAPI-based reverse proxy implementing four defense checks (see CLAUDE.md), applied
+at runtime in this order — each check only runs once the previous one has already
+confirmed the request should proceed, so nothing gets charged/reserved for a request
+about to be rejected for a different reason:
 
-**(B) Queue-aware load shedding** — polls `llamacpp:requests_deferred` from
+**1. (B) Queue-aware load shedding** — polls `llamacpp:requests_deferred` from
 llama-server's `/metrics` (cached, not per-request) and short-circuits with `503`
 before the real server's queue backs up. Falls back to the authoritative
 `/slots?fail_on_no_slot=1` check when the deferred count looks borderline.
 
-**(A) Token-budget admission control** — rejects requests based on their *estimated
-cost* (prompt tokens + requested output tokens), not just request count. This is what
-catches Profile D (`/loadgen/profiles/profile-d.js`): few requests/sec, each one huge.
-Legitimate and non-priority traffic draw from separate cost budgets so one can't starve
-the other. Only runs once (B) has already confirmed llama-server can take the request.
+**2. (C, concurrency layer) Fixed-fraction slot reservation** — caps how many
+requests per tier may be **in-flight** (forwarded, awaiting response) at once. A
+fraction of `TOTAL_LLAMA_SLOTS` (`LEGITIMATE_SLOT_FRACTION`, default 0.5) is reserved
+exclusively for `X-Priority: legitimate` traffic; default-tier traffic is capped to
+the remaining share and cannot use the reserved portion even when it's idle. This is
+independent of the token buckets below — it gates *concurrency*, not *admission
+rate/cost*. Returns `503 {"reason": "..._capacity_..."}` when a tier is full, without
+touching either bucket.
 
-**(C) Priority-tiered fair queuing** — `X-Priority: legitimate` traffic gets its own,
-larger token budget and a higher shedding threshold, so attack traffic sharing the
-wire cannot starve it.
+Deliberately **not implemented**: wait-time aging (a long-waiting default-tier
+request gradually earning priority). This is a stated cut per CLAUDE.md's cut list —
+priority-inversion/aging for tiered admission is still open, unresolved work even in
+mature schedulers (see vLLM's own RFCs #6077 and #16969). A fixed reservation with no
+aging is the documented fallback, not an oversight.
+
+**3. (A) Token-budget admission control**, which also carries **(C, admission
+layer)** — rejects requests based on their *estimated cost* (prompt tokens +
+requested output tokens), not just request count. This is what catches Profile D
+(`/loadgen/profiles/profile-d.js`): few requests/sec, each one huge. Legitimate and
+default traffic draw from separate cost budgets (the admission-time half of
+priority-tiered fair queuing; slot reservation above is the concurrency-time half).
+Only runs once (B) and slot reservation have already confirmed the request should
+proceed.
+
+**4. Forward + reconcile** — admitted requests are forwarded, then estimate-vs-actual
+is logged (see below).
+
+`⚠️ TOTAL_LLAMA_SLOTS` **must be kept in sync by hand** with whatever `-np` value
+`service/start.sh` actually passes to llama-server — the Shield has no way to read
+llama-server's real `-np` at runtime. Get it wrong and slot reservation silently
+over- or under-reserves; there's no error, it just stops doing what it's for. The
+Shield logs a warning at startup if this is left at its default.
 
 ## Exit Criterion
 
@@ -66,6 +88,8 @@ curl -X POST http://localhost:9090/completion \
 | `LEGITIMATE_BUCKET_CAPACITY` / `LEGITIMATE_BUCKET_REFILL_RATE` | 2000 / 200 | Cost-unit budget for `X-Priority: legitimate` traffic |
 | `DEFAULT_BUCKET_CAPACITY` / `DEFAULT_BUCKET_REFILL_RATE` | 500 / 50 | Cost-unit budget for everything else |
 | `DEFERRED_SHED_THRESHOLD_DEFAULT` / `_LEGITIMATE` | 2 / 8 | `llamacpp:requests_deferred` shedding thresholds |
+| `TOTAL_LLAMA_SLOTS` | 1 | **Must match** `service/start.sh`'s `-np`/`NUM_PARALLEL`. Not auto-detected. |
+| `LEGITIMATE_SLOT_FRACTION` | 0.5 | Fraction of `TOTAL_LLAMA_SLOTS` reserved for legitimate-tier in-flight requests |
 
 Cost units are ~tokens: prompt word-count/0.75 + `n_predict`/`max_tokens` (defaults to
 128 if unset). This is a cheap estimate on purpose — the whole point is to reject

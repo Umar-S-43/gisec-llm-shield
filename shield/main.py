@@ -3,20 +3,36 @@ Shield: FastAPI reverse proxy implementing cost-aware admission control.
 
 Reads LLAMA_SERVER_URL from environment (required).
 
-Defense mechanisms (see CLAUDE.md), applied at RUNTIME in the order B -> A -> C —
-queue-shedding runs first so a request that gets shed never has its token cost
-deducted (it never reaches llama-server, so charging it would drain the budget for
-nothing and skew probe-cohort survival numbers under sustained load):
-  (B) Queue-aware shedding — watches llamacpp:requests_deferred (scraped from
-      llama-server's own /metrics) and short-circuits with 503 before the real
-      server's queue backs up, using /slots?fail_on_no_slot=1 as the authoritative
-      "is there a slot" check.
-  (A) Token-budget check — rejects requests whose ESTIMATED COST (prompt tokens +
-      requested output tokens) would blow the caller's budget. This is what catches
-      Profile D (few requests/sec, each one huge) that a plain request-counter misses.
-  (C) Priority-tiered fair queuing — "legitimate" traffic (X-Priority: legitimate)
-      draws from its own reserved token budget and a higher shed threshold so attack
-      traffic sharing the same wire cannot starve it.
+Defense mechanisms (see CLAUDE.md), applied at RUNTIME in this order — each check
+runs only after the previous one has already confirmed the request should proceed,
+so nothing gets charged/reserved for a request that's about to be rejected for a
+different reason anyway:
+
+  1. (B) Queue-aware shedding — watches llamacpp:requests_deferred (scraped from
+     llama-server's own /metrics) and short-circuits with 503 before the real
+     server's queue backs up, using /slots?fail_on_no_slot=1 as the authoritative
+     "is there a slot" check.
+  2. (C, concurrency layer) Fixed-fraction slot reservation — caps how many
+     requests per TIER may be in-flight (forwarded, awaiting response) at once,
+     independent of the token buckets below. Reserves a fraction of
+     TOTAL_LLAMA_SLOTS exclusively for legitimate-tier traffic so attack traffic
+     cannot fill every slot even if it has token budget left to spend.
+  3. (A) Token-budget check, which also carries (C, admission layer) — rejects
+     requests whose ESTIMATED COST (prompt tokens + requested output tokens) would
+     blow the caller's budget. Legitimate and default traffic draw from separate
+     token buckets (the admission-time half of priority-tiered fair queuing; the
+     slot reservation above is the concurrency-time half). This budget check is
+     what catches Profile D (few requests/sec, each one huge) that a plain
+     request-counter misses.
+  4. Forward to llama-server, then reconcile estimate vs. actual (admitted
+     requests only).
+
+Deliberately NOT implemented: wait-time aging for the reserved-slot queue (i.e. a
+long-waiting default-tier request gradually earning priority). This is a stated cut
+per CLAUDE.md's cut list, not an oversight — priority-inversion/aging for exactly
+this kind of tiered admission is still open, unresolved work even in mature
+production schedulers (see vLLM's own RFCs #6077 and #16969 wrestling with the same
+problem). A fixed reservation with no aging is the documented fallback.
 
 Listens on http://localhost:9090 by default.
 """
@@ -24,6 +40,7 @@ Listens on http://localhost:9090 by default.
 import os
 import re
 import csv
+import math
 import time
 import logging
 import httpx
@@ -57,6 +74,17 @@ class Settings(BaseSettings):
     deferred_shed_threshold_default: int = 2   # shed non-priority traffic first
     deferred_shed_threshold_legitimate: int = 8  # only shed legitimate under severe backlog
 
+    # Fixed-fraction slot reservation (concurrency layer of priority-tiered fair
+    # queuing — see module docstring). total_llama_slots MUST equal whatever -np
+    # value service/start.sh actually passes to llama-server. The Shield has no
+    # way to read llama-server's real -np at runtime (it isn't exposed anywhere),
+    # so THIS HAS TO BE KEPT IN SYNC MANUALLY across the two files/processes. Get
+    # it wrong and this defense silently either over-reserves (starves legitimate
+    # traffic's own headroom) or under-reserves (lets attack traffic fill slots
+    # this was supposed to protect) — it will not error, it will just not work.
+    total_llama_slots: int = 1  # matches service/start.sh's own NUM_PARALLEL default
+    legitimate_slot_fraction: float = 0.5  # fraction of total_llama_slots reserved for legitimate tier
+
     metrics_poll_timeout: float = 2.0
 
     class Config:
@@ -71,6 +99,31 @@ if not settings.llama_server_url:
 
 logger.info(f"Shield proxy configured to forward to: {settings.llama_server_url}")
 logger.info(f"Shield active (defense-on): {settings.shield_active}")
+
+if "TOTAL_LLAMA_SLOTS" not in os.environ:
+    logger.warning(
+        f"TOTAL_LLAMA_SLOTS not set — using default {settings.total_llama_slots}. "
+        f"This MUST match the -np value service/start.sh passes to llama-server, "
+        f"and the Shield cannot verify this at runtime. If they drift, slot "
+        f"reservation (Defense C, concurrency layer) will silently do the wrong "
+        f"thing — either starving legitimate traffic or leaving attack traffic free "
+        f"to fill every slot — with no error to indicate it."
+    )
+
+# Computed once at startup, not per-request: how many of total_llama_slots are
+# reserved exclusively for legitimate-tier in-flight requests.
+_reserved_for_legitimate = math.ceil(settings.total_llama_slots * settings.legitimate_slot_fraction)
+_default_slot_capacity = settings.total_llama_slots - _reserved_for_legitimate
+logger.info(
+    f"Slot reservation: total={settings.total_llama_slots}, "
+    f"reserved_for_legitimate={_reserved_for_legitimate}, default_capacity={_default_slot_capacity}"
+)
+
+# In-flight counters (requests forwarded to llama-server, response not yet returned).
+# Plain dict, not a class/lock: asyncio is single-threaded/cooperative and these are
+# only ever mutated by non-yielding `+= 1` / `-= 1` statements, so there's no
+# interleaving hazard between the increment, the check, and the decrement.
+_in_flight = {"legitimate": 0, "default": 0}
 
 app = FastAPI(title="Shield Proxy")
 
@@ -280,9 +333,42 @@ async def forward_request(request: Request) -> JSONResponse:
         logger.warning(f"No slot available on llama-server (priority={priority}); shedding")
         return JSONResponse({"error": "No slots available"}, status_code=503)
 
-    # (A) Cost-aware token budget — only reached once queue-shedding has already
-    # confirmed llama-server can actually take this request, so a shed request
-    # never touches the bucket.
+    # (C, concurrency layer) Fixed-fraction slot reservation. Checked before the
+    # token budget for the same reason as everything else in this pipeline: don't
+    # charge a request that's about to be rejected for a different reason. Neither
+    # bucket is touched here — this only reads/writes _in_flight counters.
+    #
+    # NOTE: no wait-time aging — see module docstring for why that's a deliberate
+    # cut, not an oversight.
+    if priority:
+        # Legitimate traffic may use the full pool, including the share default
+        # traffic is capped away from.
+        if _in_flight["legitimate"] >= settings.total_llama_slots:
+            logger.warning(
+                f"Slot reservation: legitimate_in_flight={_in_flight['legitimate']} "
+                f">= total_llama_slots={settings.total_llama_slots}; shedding"
+            )
+            return JSONResponse(
+                {"error": "Tier capacity reserved", "reason": "legitimate_in_flight_at_total_capacity"},
+                status_code=503,
+            )
+    else:
+        # Default traffic is capped to its non-reserved share and cannot eat into
+        # the portion reserved for legitimate traffic, even if that portion is idle.
+        if _in_flight["default"] >= _default_slot_capacity:
+            logger.warning(
+                f"Slot reservation: default_in_flight={_in_flight['default']} "
+                f">= default_capacity={_default_slot_capacity} "
+                f"(reserved_for_legitimate={_reserved_for_legitimate}); shedding"
+            )
+            return JSONResponse(
+                {"error": "Tier capacity reserved", "reason": "default_tier_capacity_exhausted"},
+                status_code=503,
+            )
+
+    # (A) Cost-aware token budget — only reached once queue-shedding AND slot
+    # reservation have already confirmed this request should proceed, so a shed
+    # or capacity-rejected request never touches the bucket.
     prompt_cost, output_cost = estimate_request_cost(body)
     cost = prompt_cost + output_cost
     bucket = legitimate_bucket if priority else default_bucket
@@ -292,11 +378,16 @@ async def forward_request(request: Request) -> JSONResponse:
         logger.warning(f"Token budget exceeded (cost={cost}, priority={priority}); rejecting")
         return JSONResponse({"error": "Token budget exceeded", "estimated_cost": cost}, status_code=429)
 
-    # (C) Admitted — priority only affected which bucket/threshold was used above;
-    # forwarding itself is FIFO on llama-server's own scheduler. This is the only
-    # path where a cost estimate was actually made AND the request reached
-    # llama-server, so it's the only path we reconcile.
-    return await _do_forward(request, body, reconcile=(prompt_cost, output_cost), priority=priority)
+    # Admitted — forward, tracking in-flight count for the slot-reservation check
+    # above. Incremented right before the call, decremented in `finally` so the
+    # count can never leak upward whether the forward succeeds, errors internally
+    # (caught inside _do_forward), or raises unexpectedly.
+    tier_key = "legitimate" if priority else "default"
+    _in_flight[tier_key] += 1
+    try:
+        return await _do_forward(request, body, reconcile=(prompt_cost, output_cost), priority=priority)
+    finally:
+        _in_flight[tier_key] -= 1
 
 
 async def _do_forward(

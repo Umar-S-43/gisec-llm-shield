@@ -195,30 +195,35 @@ _RECONCILIATION_HEADERS = [
 
 def _log_reconciliation(priority: bool, prompt_cost: int, output_cost: int, response_json) -> None:
     """
-    Compare estimated cost against llama-server's reported usage for an ADMITTED
-    request. Log-only: never adjusts the token bucket.
+    Compare estimated cost against llama-server's reported token counts for an
+    ADMITTED request. Log-only: never adjusts the token bucket.
 
-    NOT VERIFIED against a live server: llama-server's native /completion endpoint
-    (what every current loadgen script calls) is not confirmed to return an
-    OpenAI-style `usage: {prompt_tokens, completion_tokens}` object — the
-    OpenAI-compatible endpoints (/v1/completions, /v1/chat/completions) are the
-    ones documented to. If `usage` is absent here, that may be why; verify against
-    your actual server rather than assuming this silently "isn't working."
+    llama-server's NATIVE /completion endpoint (what every current loadgen script
+    calls) does not return an OpenAI-style `usage` object — confirmed from
+    llama.cpp's own /completion example response. It instead returns, at the
+    top level: `tokens_evaluated` (prompt tokens actually processed) and
+    `tokens_predicted` (output tokens actually generated). Those are what we read
+    here. The CSV columns are still named prompt_tokens_actual/
+    completion_tokens_actual for consistency with the analysis scripts — that's a
+    presentation rename only, not a claim that llama-server calls them that.
+
+    If this code is ever pointed at the OpenAI-compatible endpoints
+    (/v1/completions, /v1/chat/completions) instead, it will need a `usage` branch
+    added back — those endpoints use the OpenAI shape, not this one.
     """
     if not isinstance(response_json, dict):
         logger.warning("Reconciliation skipped: response body was not JSON (streaming response or non-JSON error body?)")
         return
 
-    usage = response_json.get("usage")
-    if not isinstance(usage, dict) or "prompt_tokens" not in usage or "completion_tokens" not in usage:
+    if "tokens_evaluated" not in response_json or "tokens_predicted" not in response_json:
         logger.warning(
-            "Reconciliation skipped: response JSON had no usable 'usage.prompt_tokens'/'usage.completion_tokens'. "
-            "See _log_reconciliation docstring — this endpoint may not report usage the way this code expects."
+            "Reconciliation skipped: response JSON had no usable 'tokens_evaluated'/'tokens_predicted'. "
+            "See _log_reconciliation docstring — expected on llama-server's native /completion endpoint."
         )
         return
 
-    prompt_actual = usage["prompt_tokens"]
-    completion_actual = usage["completion_tokens"]
+    prompt_actual = response_json["tokens_evaluated"]
+    completion_actual = response_json["tokens_predicted"]
     total_estimated = prompt_cost + output_cost
     total_actual = prompt_actual + completion_actual
     signed_error = total_actual - total_estimated

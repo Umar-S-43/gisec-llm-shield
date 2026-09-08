@@ -111,9 +111,9 @@ k6 run loadgen/profiles/baseline.js
 ```
 
 See [/loadgen/README.md](/loadgen/README.md) for:
-- Available load profiles (4 profiles + legitimate probe)
+- Available load profiles (A/B/C/D + legitimate probe — Profile D is the key differentiator)
+- The interleaved defense-off/defense-on comparison harness (`run_comparison.sh`)
 - Multi-cohort Locust scenarios
-- How to select profile by workload type
 
 ### Running the Shield Proxy
 

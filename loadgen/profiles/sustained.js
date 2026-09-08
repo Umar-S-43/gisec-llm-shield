@@ -1,22 +1,28 @@
 import http from 'k6/http';
-import { check, sleep } from 'k6';
+import { check } from 'k6';
+import { summaryReport } from './lib/summary.js';
 
-// Sustained attack profile: high-volume load without priority headers
+// Profile C — Sustained flood: high, constant arrival rate for a long period,
+// no priority header (simulated attack traffic). Open-loop.
 const SERVER_URL = __ENV.LLAMA_SERVER_URL || 'http://localhost:8080';
 
 export const options = {
-    stages: [
-        { duration: '10s', target: 50 },   // Ramp up to 50 req/sec (high load)
-        { duration: '2m', target: 50 },    // Sustain for 2 minutes
-        { duration: '10s', target: 0 },    // Ramp down
-    ],
-    thresholds: {
-        http_req_duration: ['p(95)<5000'],
-        http_req_failed: ['rate<0.5'],  // Expect high error rate under attack
+    scenarios: {
+        profile_c_sustained: {
+            executor: 'constant-arrival-rate',
+            rate: 50,
+            timeUnit: '1s',
+            duration: '2m',
+            preAllocatedVUs: 100,
+            maxVUs: 300,
+        },
     },
+    // No pass/fail thresholds here on purpose: this profile is EXPECTED to fail
+    // requests under an unprotected server. It exists to characterize how badly
+    // things degrade, not to assert an SLA.
 };
 
-export default function() {
+export default function () {
     const payload = JSON.stringify({
         prompt: 'Lorem ipsum dolor sit amet',
         n_predict: 200,
@@ -25,7 +31,7 @@ export default function() {
     const params = {
         headers: {
             'Content-Type': 'application/json',
-            // NO X-Priority header: this is simulated attack traffic
+            // Deliberately NO X-Priority header: this is simulated attack traffic.
         },
         timeout: '60s',
     };
@@ -33,9 +39,10 @@ export default function() {
     const res = http.post(`${SERVER_URL}/completion`, payload, params);
 
     check(res, {
-        'got a response': (r) => r.status > 0,
-        'error rate measured': (r) => true,  // Log all responses for analysis
+        'got any response': (r) => r.status > 0,
     });
+}
 
-    sleep(0.2);
+export function handleSummary(data) {
+    return summaryReport(data, 'profile_c_sustained');
 }

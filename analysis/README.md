@@ -26,7 +26,18 @@ python analysis/charts.py results/run_*.csv --output docs/charts/
 
 # Drift detection: cross-run consistency check
 python analysis/drift_check.py results/run_*.csv --threshold 0.2
+
+# Compare interleaved defense-off vs defense-on rounds (from loadgen/run_comparison.sh)
+python analysis/compare_on_off.py results/comparison_profile-d_20260908_140000/
 ```
+
+## Reporting Rules (non-negotiable, see CLAUDE.md)
+
+- Always report `dropped_iterations` next to every latency number.
+- Report p50/p95/p99 and Max. **Never report standard deviation** of latency — it's
+  statistically misleading for this queue-driven, skewed kind of data.
+- Defense-off vs defense-on comparisons must come from interleaved rounds
+  (`loadgen/run_comparison.sh`), not two separate blocks — see `compare_on_off.py`.
 
 ## Input Format: Per-Request CSV
 

@@ -117,6 +117,10 @@ and paste in whatever the current host's IP is.
 Skipping step 2/3 is the most likely reason a session "isn't working" — someone's still
 pointed at last session's IP.
 
+`LLAMA_SERVER_URL` isn't the only value that has to be kept in sync by hand across
+files — see [docs/MANUAL_CONFIG.md](docs/MANUAL_CONFIG.md) for the full list (e.g.
+`-np` vs. the Shield's slot count) before changing `-np` or tuning any threshold.
+
 ---
 
 ## Non-negotiables — do not cut these even under time pressure

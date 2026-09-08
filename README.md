@@ -166,6 +166,7 @@ Update this table as you run experiments. Include date, which laptop hosted the 
 - **CPU-only:** No GPU flags, no CUDA, no cloud infrastructure.
 - **Pinned dependencies:** Python deps locked to exact versions in `requirements.txt` to prevent drift during short shared sessions.
 - **No CI/CD:** Manual runs only; no automated testing infrastructure (4-day timeline).
+- **Manual config sync:** Several values (e.g. `-np` vs. the Shield's slot count) must be kept in sync by hand across files — see [docs/MANUAL_CONFIG.md](docs/MANUAL_CONFIG.md) before changing `-np` or tuning any threshold.
 
 ## Workstream Branches
 

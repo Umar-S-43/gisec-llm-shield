@@ -29,7 +29,27 @@ python analysis/drift_check.py results/run_*.csv --threshold 0.2
 
 # Compare interleaved defense-off vs defense-on rounds (from loadgen/run_comparison.sh)
 python analysis/compare_on_off.py results/comparison_profile-d_20260908_140000/
+
+# Verify the CI math itself is correct (known-example + synthetic + fake-CSV
+# end-to-end checks) — run this if you ever touch wilson_ci or bootstrap_ci
+python analysis/verify_ci_functions.py
 ```
+
+## CI Function Signatures
+
+- `proportions.wilson_ci(successes: int, n: int, confidence: float = 0.90) -> tuple[float, float]`
+  — Wilson score interval, returned as a (lower, upper) **proportion** in [0, 1]
+  (multiply by 100 for display). Not the same as a Clopper-Pearson exact interval —
+  the two methods give different answers for the same input by construction.
+- `analyze.bootstrap_ci(samples: list[float], percentile: float, n_resamples: int = 2000, confidence: float = 0.90) -> tuple[float, float]`
+  — nonparametric bootstrap percentile CI for a given percentile (0-100 scale,
+  matching `np.percentile`) of latency (or any numeric) data.
+
+Both are verified in `analysis/verify_ci_functions.py` against a known Wilson
+example, synthetic latency data, and `analysis/fixtures/sample_run.csv` — a fake
+CSV shaped like real loadgen/shield output (including a `run_order` column for
+future thermal-drift/cross-session work, which is NOT implemented yet — see
+`drift_check.py` for that separate, later task).
 
 ## Reporting Rules (non-negotiable, see CLAUDE.md)
 

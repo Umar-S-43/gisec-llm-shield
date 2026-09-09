@@ -11,24 +11,39 @@ import numpy as np
 from pathlib import Path
 
 
-def bootstrap_ci(data, n_bootstrap=1000, ci=95):
-    """Compute bootstrap CI for a metric (e.g., latency percentiles)."""
-    if len(data) < 2:
-        return None, (None, None)
+def bootstrap_ci(
+    samples: list[float],
+    percentile: float,
+    n_resamples: int = 2000,
+    confidence: float = 0.90,
+) -> tuple[float, float]:
+    """
+    Nonparametric bootstrap percentile confidence interval for a given percentile
+    of latency (or any other) data. `percentile` is on the 0-100 scale (e.g. 95
+    for p95), matching numpy's np.percentile convention.
 
-    percentile_target = np.percentile(data, ci)
-    bootstrap_samples = []
+    Resamples `samples` with replacement `n_resamples` times, computes the
+    requested percentile on each resample, and returns the (lower, upper) bound
+    of the resulting distribution at the given confidence level. Returns
+    (None, None) if there isn't enough data to resample meaningfully.
+    """
+    if len(samples) < 2:
+        return (None, None)
 
-    for _ in range(n_bootstrap):
-        sample = np.random.choice(data, size=len(data), replace=True)
-        sample_percentile = np.percentile(sample, ci)
-        bootstrap_samples.append(sample_percentile)
+    samples = np.asarray(samples)
+    n = len(samples)
+    rng = np.random.default_rng()
 
-    bootstrap_samples = sorted(bootstrap_samples)
-    ci_lower = bootstrap_samples[int(0.025 * n_bootstrap)]
-    ci_upper = bootstrap_samples[int(0.975 * n_bootstrap)]
+    boot_stats = np.empty(n_resamples)
+    for i in range(n_resamples):
+        resample = rng.choice(samples, size=n, replace=True)
+        boot_stats[i] = np.percentile(resample, percentile)
 
-    return percentile_target, (ci_lower, ci_upper)
+    alpha = 1 - confidence
+    ci_lower = np.percentile(boot_stats, 100 * alpha / 2)
+    ci_upper = np.percentile(boot_stats, 100 * (1 - alpha / 2))
+
+    return (float(ci_lower), float(ci_upper))
 
 
 def analyze_csv(csv_path):
@@ -54,9 +69,10 @@ def analyze_csv(csv_path):
     print("\nPercentile Analysis (successful requests only):")
 
     for p in [50, 95, 99]:
-        percentile, (ci_lower, ci_upper) = bootstrap_ci(latencies, ci=p)
-        if percentile is not None:
-            print(f"  p{p:2d}: {percentile:6.0f} ms [95% CI: {ci_lower:.0f}-{ci_upper:.0f} ms]")
+        point_estimate = np.percentile(latencies, p)
+        ci_lower, ci_upper = bootstrap_ci(latencies, p, confidence=0.90)
+        if ci_lower is not None:
+            print(f"  p{p:2d}: {point_estimate:6.0f} ms [90% CI: {ci_lower:.0f}-{ci_upper:.0f} ms]")
 
     print(f"  max:  {latencies.max():.0f} ms")
     print()

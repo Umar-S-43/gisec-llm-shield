@@ -57,3 +57,32 @@ models/*.gguf
 .DS_Store
 .AppleDouble
 .LSOverride
+
+
+
+
+
+
+##########################
+# llama.cpp binaries
+llama/
+*.exe
+*.dll
+
+# Models
+models/
+*.gguf
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pycache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

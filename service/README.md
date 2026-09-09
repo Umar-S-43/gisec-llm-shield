@@ -42,7 +42,7 @@ The `start.sh` script should:
    - `--metrics` (exposes `/metrics` endpoint in Prometheus text format)
    - `-np 1` (max concurrent requests)
    - `-t 4` (CPU threads; adjust for your machine)
-   - `-c 2048` (context window size; adjust if model differs)
+   - `-c 4096` (context window size — see [docs/MANUAL_CONFIG.md](../docs/MANUAL_CONFIG.md); must stay comfortably above Profile D's worst-case prompt+output token count, adjust if model differs)
 
 ### Prometheus Metrics
 

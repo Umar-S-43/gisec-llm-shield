@@ -402,7 +402,12 @@ async def _do_forward(
                 f"{settings.llama_server_url}{request.url.path}",
                 content=body,
                 headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
-                timeout=60.0,
+                # Must stay comfortably ABOVE the longest client-side timeout any loadgen
+                # script sets (profile-d.js: 120s), not equal to it — otherwise the Shield
+                # can kill a request the client was still willing to wait for, which shows
+                # up in results as "the Shield is broken" rather than what it actually is.
+                # See docs/MANUAL_CONFIG.md.
+                timeout=130.0,
             )
             try:
                 parsed = response.json()

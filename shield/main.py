@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     # it wrong and this defense silently either over-reserves (starves legitimate
     # traffic's own headroom) or under-reserves (lets attack traffic fill slots
     # this was supposed to protect) — it will not error, it will just not work.
-    total_llama_slots: int = 1  # matches service/start.sh's own NUM_PARALLEL default
+    total_llama_slots: int = 4  # matches service/start.sh's own NUM_PARALLEL default
     legitimate_slot_fraction: float = 0.5  # fraction of total_llama_slots reserved for legitimate tier
 
     metrics_poll_timeout: float = 2.0

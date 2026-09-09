@@ -40,7 +40,7 @@ The `start.sh` script should:
 2. Print the server URL it's listening on
 3. Launch llama-server with:
    - `--metrics` (exposes `/metrics` endpoint in Prometheus text format)
-   - `-np 1` (max concurrent requests)
+   - `-np 4` (max concurrent requests — see [docs/MANUAL_CONFIG.md](../docs/MANUAL_CONFIG.md); must match shield/main.py's `total_llama_slots`)
    - `-t 4` (CPU threads; adjust for your machine)
    - `-c 4096` (context window size — see [docs/MANUAL_CONFIG.md](../docs/MANUAL_CONFIG.md); must stay comfortably above Profile D's worst-case prompt+output token count, adjust if model differs)
 

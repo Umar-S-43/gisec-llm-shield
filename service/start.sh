@@ -7,7 +7,8 @@ set -e
 # Configuration (adjust these based on your hardware)
 MODEL_PATH="${MODEL_PATH:=models/Mistral-7B-Instruct-v0.1.Q4_K_M.gguf}"
 LLAMA_SERVER_PORT="${LLAMA_SERVER_PORT:=8080}"
-NUM_PARALLEL="${NUM_PARALLEL:=1}"      # -np: max concurrent requests
+NUM_PARALLEL="${NUM_PARALLEL:=4}"      # -np: max concurrent requests — see docs/MANUAL_CONFIG.md
+                                        # (must match shield/main.py's total_llama_slots)
 NUM_THREADS="${NUM_THREADS:=4}"        # -t: CPU threads (adjust for your machine)
 CONTEXT_SIZE="${CONTEXT_SIZE:=4096}"   # -c: context window size — see docs/MANUAL_CONFIG.md
                                         # (must stay comfortably above Profile D's ~2112-token

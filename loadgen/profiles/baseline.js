@@ -9,15 +9,25 @@ import { summaryReport } from './lib/summary.js';
 // hides the exact overload we're trying to measure ("coordinated omission").
 const SERVER_URL = __ENV.LLAMA_SERVER_URL || 'http://localhost:8080';
 
+// preAllocatedVUs sizing formula (kickoff doc, not a guess):
+//   preAllocatedVUs = ceil(median_iteration_duration_seconds * rate) + buffer_for_variance
+// MEDIAN_ITERATION_S is an ESTIMATE (small prompt, n_predict=50, CPU-only decode) until
+// Day 1's session produces a real measured median from this profile — override via env
+// once that number exists, e.g. BASELINE_MEDIAN_ITERATION_S=3.2.
+const RATE = 5; // requests/sec, arrival-based, not VU-based
+const MEDIAN_ITERATION_S = Number(__ENV.BASELINE_MEDIAN_ITERATION_S || 4);
+const BUFFER_FOR_VARIANCE = 10;
+const PRE_ALLOCATED_VUS = Math.ceil(MEDIAN_ITERATION_S * RATE) + BUFFER_FOR_VARIANCE;
+
 export const options = {
     scenarios: {
         profile_a_normal: {
             executor: 'constant-arrival-rate',
-            rate: 5,                  // 5 requests/sec, arrival-based, not VU-based
+            rate: RATE,
             timeUnit: '1s',
             duration: '2m',
-            preAllocatedVUs: 20,
-            maxVUs: 50,
+            preAllocatedVUs: PRE_ALLOCATED_VUS,
+            maxVUs: PRE_ALLOCATED_VUS * 2,
         },
     },
     thresholds: {
@@ -36,6 +46,12 @@ export default function () {
         headers: {
             'Content-Type': 'application/json',
             'X-Priority': 'legitimate',
+        },
+        // Tags surface as columns in k6's --out csv=<file> raw output, which
+        // loadgen/normalize_csv.py reads to build the per-request CSV /analysis expects.
+        tags: {
+            request_type: 'completion',
+            priority: 'legitimate',
         },
         timeout: '60s',
     };

@@ -42,27 +42,48 @@ echo "Defense-on target:  $SHIELD_URL (through Shield)"
 echo "Results dir: $RESULTS_DIR"
 echo "=========================================="
 
+# run_order counts every leg in the ACTUAL chronological sequence they execute in
+# (round1-off=1, round1-on=2, round2-off=3, ...), not just the round number. CLAUDE.md
+# calls for this: laptops thermal-throttle under sustained load, so drift across the
+# session needs to be visible as a column in the data, not just inferred from filenames.
+RUN_ORDER=0
+
 run_leg() {
     local mode="$1"       # off | on
     local round="$2"
     local target="$3"
+    RUN_ORDER=$((RUN_ORDER + 1))
 
     echo ""
-    echo "--- Round $round: defense-$mode ---"
+    echo "--- Round $round: defense-$mode (run_order=$RUN_ORDER) ---"
 
     # Legitimate probe runs concurrently in the background for this leg.
+    # --out csv writes k6's raw per-request samples (not just the aggregate summary) —
+    # normalize_csv.py reshapes that into the per-request CSV /analysis reads.
     LLAMA_SERVER_URL="$target" PROBE_DURATION="2m" \
         k6 run loadgen/profiles/probe.js \
         --summary-export="$RESULTS_DIR/round${round}_${mode}_probe.json" \
+        --out csv="$RESULTS_DIR/round${round}_${mode}_probe_raw.csv" \
         > "$RESULTS_DIR/round${round}_${mode}_probe.log" 2>&1 &
     local probe_pid=$!
 
     LLAMA_SERVER_URL="$target" \
         k6 run "loadgen/profiles/${PROFILE}.js" \
         --summary-export="$RESULTS_DIR/round${round}_${mode}_attack.json" \
+        --out csv="$RESULTS_DIR/round${round}_${mode}_attack_raw.csv" \
         > "$RESULTS_DIR/round${round}_${mode}_attack.log" 2>&1
 
     wait "$probe_pid"
+
+    python loadgen/normalize_csv.py \
+        "$RESULTS_DIR/round${round}_${mode}_probe_raw.csv" \
+        "$RESULTS_DIR/round${round}_${mode}_probe.csv" \
+        --run-order "$RUN_ORDER"
+    python loadgen/normalize_csv.py \
+        "$RESULTS_DIR/round${round}_${mode}_attack_raw.csv" \
+        "$RESULTS_DIR/round${round}_${mode}_attack.csv" \
+        --run-order "$RUN_ORDER"
+
     echo "Round $round ($mode) complete."
 }
 
@@ -74,6 +95,9 @@ done
 echo ""
 echo "=========================================="
 echo "All rounds complete. Raw results in: $RESULTS_DIR"
-echo "Next: python analysis/analyze.py $RESULTS_DIR/*_attack.json"
-echo "      python analysis/proportions.py $RESULTS_DIR/*_probe.json"
+echo "Per-request CSVs (analysis-ready): $RESULTS_DIR/round*_*.csv"
+echo "Next: python analysis/analyze.py $RESULTS_DIR/round1_off_attack.csv"
+echo "      python analysis/proportions.py $RESULTS_DIR/round1_off_attack.csv"
+echo "      python analysis/drift_check.py $RESULTS_DIR/round*_attack.csv --threshold 0.2"
+echo "      python analysis/compare_on_off.py $RESULTS_DIR"
 echo "=========================================="

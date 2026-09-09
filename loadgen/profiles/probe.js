@@ -16,6 +16,16 @@ import { summaryReport } from './lib/summary.js';
 // success rate directly measures "did the real user survive the attack."
 const SERVER_URL = __ENV.LLAMA_SERVER_URL || 'http://localhost:8080';
 
+// preAllocatedVUs sizing formula (kickoff doc, not a guess):
+//   preAllocatedVUs = ceil(median_iteration_duration_seconds * rate) + buffer_for_variance
+// Rate here is ~0.5 req/s (1 per 2s). MEDIAN_ITERATION_S is an ESTIMATE (n_predict=30,
+// small prompt) until Day 1's session measures the real value — override via
+// PROBE_MEDIAN_ITERATION_S once that exists.
+const RATE_PER_SECOND = 0.5;
+const MEDIAN_ITERATION_S = Number(__ENV.PROBE_MEDIAN_ITERATION_S || 3);
+const BUFFER_FOR_VARIANCE = 4;
+const PRE_ALLOCATED_VUS = Math.ceil(MEDIAN_ITERATION_S * RATE_PER_SECOND) + BUFFER_FOR_VARIANCE;
+
 export const options = {
     scenarios: {
         legitimate_probe: {
@@ -23,8 +33,8 @@ export const options = {
             rate: 1,                  // deliberately small and constant
             timeUnit: '2s',           // ~0.5 req/sec
             duration: __ENV.PROBE_DURATION || '2m',
-            preAllocatedVUs: 5,
-            maxVUs: 10,
+            preAllocatedVUs: PRE_ALLOCATED_VUS,
+            maxVUs: PRE_ALLOCATED_VUS * 2,
         },
     },
     thresholds: {
@@ -44,6 +54,10 @@ export default function () {
         headers: {
             'Content-Type': 'application/json',
             'X-Priority': 'legitimate',
+        },
+        tags: {
+            request_type: 'completion',
+            priority: 'legitimate',
         },
         timeout: '30s',
     };

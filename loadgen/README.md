@@ -78,11 +78,41 @@ python -m locust -f loadgen/locustfile.py --host=$LLAMA_SERVER_URL
 
 Each k6 script's `handleSummary` writes:
 - Console text summary (iterations, dropped_iterations, error rate, p50/p95/p99/max)
-- `results/k6_<scenario>_<timestamp>.json` — machine-readable, consumed by `/analysis`
+- `results/k6_<scenario>_<timestamp>.json` — aggregate summary only
+
+That aggregate JSON is **not** what `/analysis` reads for percentile/CI/drift work —
+`analyze.py` and `drift_check.py` need raw per-request rows. Get those with k6's
+built-in raw output plus the normalizer script:
+
+```bash
+k6 run --out csv=results/raw_baseline.csv loadgen/profiles/baseline.js
+python loadgen/normalize_csv.py results/raw_baseline.csv results/run_baseline.csv --run-order 1
+```
+
+`--out csv=<file>` is k6's own real-time output writer — it's the only built-in way to
+get every raw sample (not just the summary) across all VUs, since k6 doesn't let scripts
+write arbitrary files from VU code. `normalize_csv.py` filters that down to one row per
+completed request and reshapes it into the schema `/analysis` expects:
+`timestamp,request_type,response_code,latency_ms,error_message,priority,server_url,run_order`
+(see `analysis/README.md`). `--run-order` is the position of this run in the session's
+chronological sequence (1, 2, 3, ...) — not a per-request field — so thermal drift across
+a session is visible as a column in the data, not something you have to infer from
+filenames. `loadgen/run_comparison.sh` does both of these steps automatically for every
+interleaved round.
 
 `dropped_iterations` is k6's own signal that the **load generator** could not keep up
 with its configured arrival rate — report it next to every latency number so a reader
-can tell "the server was slow" from "the load generator itself fell behind."
+can tell "the server was slow" from "the load generator itself fell behind." It shows
+up in both the aggregate JSON summary and as its own metric rows in the raw CSV.
+
+### preAllocatedVUs sizing
+
+Each script computes `preAllocatedVUs` from the documented formula
+(`ceil(median_iteration_duration_seconds * rate) + buffer_for_variance`), not a flat
+guess. The median-iteration-duration constant in each script is an ESTIMATE until Day
+1's session measures the real value against Syeda's server — override it via the
+env var named in that script's comment (e.g. `PROFILE_D_MEDIAN_ITERATION_S=25`) once
+real numbers exist, rather than editing the hardcoded default.
 
 ## Environment Variables
 

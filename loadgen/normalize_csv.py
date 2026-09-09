@@ -18,6 +18,12 @@ analyze.py / drift_check.py already read:
 
 `request_type` and `priority` come from the k6 script tagging each request with
 `params.tags = { request_type: ..., priority: ... }` (see loadgen/profiles/*.js).
+Verified against real k6 output (v2.2.0): custom tags do NOT get their own CSV
+columns — they're packed into a single `extra_tags` column as a URL query string,
+e.g. `request_type=completion&priority=legitimate`. This script parses that back
+out; if some other k6 version instead gives each tag its own column, that's used
+in preference (see parse_extra_tags/normalize below).
+
 `run_order` is NOT per-request; it is the position of this whole run/round in the
 session's chronological sequence (round 1, round 2, ...), passed in via --run-order.
 CLAUDE.md calls for this because laptops thermal-throttle under sustained load, so
@@ -33,6 +39,7 @@ import csv
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 
 def k6_timestamp_to_iso(raw_timestamp):
@@ -41,6 +48,18 @@ def k6_timestamp_to_iso(raw_timestamp):
         return datetime.fromtimestamp(float(raw_timestamp), tz=timezone.utc).isoformat()
     except (TypeError, ValueError):
         return ""
+
+
+def parse_extra_tags(raw_value):
+    """
+    k6's csv output packs custom tags (anything set via params.tags in the script)
+    into one 'extra_tags' column as a URL query string rather than giving each tag
+    its own column — verified against real k6 v2.2.0 output, e.g.:
+    'request_type=completion&priority=legitimate'. Parse that back into a dict.
+    """
+    if not raw_value:
+        return {}
+    return dict(parse_qsl(raw_value))
 
 
 def normalize(raw_csv_path, out_csv_path, run_order):
@@ -71,14 +90,20 @@ def normalize(raw_csv_path, out_csv_path, run_order):
             if row.get("metric_name") != "http_req_duration":
                 continue
 
+            tags = parse_extra_tags(row.get("extra_tags", ""))
+            # Prefer a dedicated column if some k6 version/config provides one;
+            # otherwise fall back to the extra_tags blob (the common case).
+            request_type = row.get("request_type") or tags.get("request_type", "")
+            priority = row.get("priority") or tags.get("priority", "")
+
             writer.writerow(
                 [
                     k6_timestamp_to_iso(row.get("timestamp")),
-                    row.get("request_type", ""),
+                    request_type,
                     row.get("status", ""),
                     row.get("metric_value", ""),
                     row.get("error", ""),
-                    row.get("priority", ""),
+                    priority,
                     row.get("url", ""),
                     run_order,
                 ]

@@ -116,7 +116,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("csv_files", nargs="*", help="CSV files or glob pattern")
-    parser.add_argument("--threshold", type=float, default=0.2, help="Deviation threshold (default 0.2 = 20%)")
+    parser.add_argument("--threshold", type=float, default=0.2, help="Deviation threshold (default 0.2 = 20%%)")
     args = parser.parse_args()
 
     if not args.csv_files:

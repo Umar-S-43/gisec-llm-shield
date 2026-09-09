@@ -69,7 +69,10 @@ Session metadata: date, host, generator, recorded metrics
 
 ### Prerequisites
 
-- **Python 3.11** (exact version required for reproducibility)
+- **Python 3.10+** (any recent CPython works; `shield/requirements.txt` and
+  `analysis/requirements.txt` are pinned to versions with prebuilt wheels as of
+  2026-09-09, tested through 3.14 — if your interpreter can't install a pin,
+  bump it and re-pin rather than hunting for an exact matching Python version)
 - **k6** (separate binary, not a Python dependency) — [install from k6.io](https://k6.io/docs/getting-started/installation/)
 - **llama.cpp** binary (`llama-server`) — See [/service/README.md](/service/README.md)
 

@@ -3,6 +3,20 @@ Latency analysis with bootstrap confidence intervals.
 
 Usage:
     python analysis/analyze.py results/run_20260908_baseline.csv
+
+Method choice (documented per the research brief's explicit ask — resampling
+raw per-request samples within a run vs. resampling per-run percentile point
+estimates is a real choice, not a prescribed method):
+
+We resample the RAW per-request latency samples within a single run, not the
+set of run-level percentile point-estimates across runs. Reason: CLAUDE.md's
+cut list allows as few as 3 runs per arm (5 -> 3 under time pressure). Bootstrapping
+a set of only 3-5 point estimates would be built on far too little data to say
+anything stable about the interval's shape. A single run instead has hundreds of
+raw request samples, which is enough to characterize that run's own sampling
+variability. Cross-run/cross-session variability (thermal drift, different
+sessions/laptops) is a different question and is handled separately by
+drift_check.py, not folded into this per-run CI.
 """
 
 import sys

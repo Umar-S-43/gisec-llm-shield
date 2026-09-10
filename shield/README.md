@@ -90,6 +90,7 @@ curl -X POST http://localhost:9090/completion \
 | `DEFERRED_SHED_THRESHOLD_DEFAULT` / `_LEGITIMATE` | 2 / 8 | `llamacpp:requests_deferred` shedding thresholds |
 | `TOTAL_LLAMA_SLOTS` | 4 | **Must match** `service/start.sh`'s `-np`/`NUM_PARALLEL`. Not auto-detected. |
 | `LEGITIMATE_SLOT_FRACTION` | 0.5 | Fraction of `TOTAL_LLAMA_SLOTS` reserved for legitimate-tier in-flight requests |
+| `SLOT_CHECK_TTL` | 0.5 | Cache TTL (seconds) for the `/slots` availability check — see `docs/MANUAL_CONFIG.md`. Performance fix, **unverified** as of introduction; tune once real rerun data exists. |
 
 Cost units are ~tokens: prompt word-count/0.75 + `n_predict`/`max_tokens` (defaults to
 128 if unset). This is a cheap estimate on purpose — the whole point is to reject

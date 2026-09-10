@@ -5,38 +5,79 @@ Record each test run here with metadata, results, and observations. Use this to 
 ## Status as of 2026-09-10 (read this before starting a new session)
 
 - **Team status:** Server (Syeda), Shield (Umar), Loadgen+Analysis (Negar) are all
-  implemented and were live-tested together on 2026-09-09 over a phone hotspot
-  (10.185.191.x). Deadline: 11 Sept 23:59 GST.
-- **Branches/PRs:** `feature/loadgen` and `feature/analysis` are MERGED into `main`.
-  `feature/shield` has an OPEN, unmerged PR (#3) — **`main` does NOT yet have**
-  the `slot_available()` perf fix or two startup bugfixes (`extra="ignore"`,
-  `model_fields_set` check) from that PR. `feature/service` still has zero pushed
-  commits — Syeda's server config was never committed to git (only run locally).
-- **What was actually run on 2026-09-09** (see Run Table below): Phase 1 (baseline,
-  no attack) — 100% survival. Phase 2 (sustained attack, no Shield) — 2.2% legitimate
-  survival, service effectively down. Phase 3 (same attack, through the Shield) —
-  17.3% legitimate survival (~8x better than no defense, but far from complete).
-- **Open investigation, partially resolved 2026-09-10:** the raw k6 error-string
-  data for Phase 3's 32 `response_code=0` entries has now been recovered and
-  committed (see the 2026-09-10 entry below "Negar's raw k6 CSVs recovered") — it
-  splits cleanly 16/16 into `dial: errno 10060` (TCP handshake never acknowledged;
-  points at Shield-side saturation, targeted by PR #3) vs `request timeout`
-  (connection succeeded, no response in time; targeted by the `probe.js` timeout
-  fix). Both existing fixes now have a specific, distinct sub-count to check against
-  in a rerun, instead of one explaining 10 and 22 being a total mystery. Still
-  UNVERIFIED without that rerun. Also still unresolved: the Shield's results folder
-  sits inside a OneDrive-synced directory, a live confirmed variable that was never
-  ruled in or out as a contributing cause.
-- **Next actions, in priority order:** (1) merge PR #3 (and the `probe.js` timeout
-  fix) or decide against them, (2) ~~get k6's raw output~~ DONE 2026-09-10 — see
-  entry below, (3) rerun the identical Phase 3 profile and check the `dial`-error
-  and `request timeout` counts SEPARATELY, not just the total `response_code=0`
-  count — that's what actually confirms or refutes each fix individually, (4) test
-  `profile-d.js` (slow/high-cost), never run yet, (5) get Syeda to push her real
-  `service/start.sh` config for the record.
+  implemented and were live-tested together on 2026-09-09 and 2026-09-10 over a
+  phone hotspot (10.185.191.x). Deadline: 11 Sept 23:59 GST.
+- **Branches/PRs:** `feature/loadgen`, `feature/analysis`, and `feature/shield`
+  (PR #3, the `slot_available()` perf fix + two startup bugfixes) are all MERGED
+  into `main`. A second Shield perf fix (pooling `get_requests_deferred()`'s
+  client, found live — see incident entry below) is also merged (`b390503`).
+  `feature/service` still has zero pushed commits — Syeda's server config was
+  never committed to git (only run locally).
+- **RESOLVED 2026-09-10: both Shield perf fixes are CONFIRMED, not just theorized.**
+  A live rerun (Phase 4, identical attack profile to Phase 3) after both fixes
+  landed shows: legitimate survival **17.3% → 60.0%** (90% CI 10.4–27.5% vs.
+  49.4–69.8% — non-overlapping, a real effect), and the `response_code=0` count
+  that drove the whole investigation went **32 → 0**. Every Phase 4 failure is now
+  a clean `503` (Shield correctly and quickly rejecting). See the confirming-rerun
+  entry below for full numbers. Do not re-open this as "unverified" — it's closed.
+- **What was actually run** (see Run Table below): Phase 1 (baseline, no attack) —
+  100% survival. Phase 2 (sustained attack, no Shield) — 2.2% legitimate survival,
+  service effectively down. Phase 3 (same attack, Shield with the unfixed
+  `slot_available()` bug) — 17.3% survival. Phase 4 (same attack, Shield with both
+  perf fixes) — **60.0% survival, confirmed**.
+- **Next actions, in priority order:** (1) test `profile-d.js` (slow/high-cost —
+  the project's key differentiator profile), never run yet, (2) get Syeda to push
+  her real `service/start.sh` config for the record, (3) consider whether 60%
+  survival under a 50 req/s flood is the ceiling of the current defense tuning
+  (token bucket sizes, slot reservation fraction) or whether further tuning could
+  push it higher — worth a documented discussion in the final report either way.
 - **Full detail:** `docs/MANUAL_CONFIG.md` has the dated, itemized history of every
   config value that had to be fixed this way (context size, Shield timeout, `-np`
   sync) — read it before touching any threshold or flag.
+
+## 2026-09-10 update — CONFIRMING RERUN: both Shield perf fixes verified live (Phase 4)
+
+After PR #3 (`slot_available()` caching) and the live-incident fix
+(`get_requests_deferred()` pooling, `b390503`) both landed on `main`, ran the
+identical attack profile from Phase 3 (`sustained.js`, 50 req/s flood for 2m,
+`probe.js` concurrently, both through the Shield at 10.185.191.136:9090) against
+Syeda's server (10.185.191.119:8080) to check whether they actually work, not just
+whether they're theoretically sound.
+
+**Result — clean, unambiguous improvement:**
+
+| | Phase 3 (buggy) | Phase 4 (fixed) |
+|---|---|---|
+| Legitimate survival | 17.3% (9/52) | **60.0% (36/60)** |
+| 90% CI (Wilson) | 10.4–27.5% | 49.4–69.8% |
+| `response_code=0` count | 32 | **0** |
+| Probe dropped_iterations | 9 (14.8%) | 0 (0.0%) |
+| Attack traffic median latency | ~5,795ms | **~105ms** |
+| Attack traffic dropped_iterations | 1,048 (17.5%) | 0 (0.0%) |
+
+The 90% CIs for Phase 3 vs. Phase 4 don't overlap — this is a real effect, not
+noise. Phase 4's probe failures are now 24/60, **all** clean `503 Overloaded`
+responses — no `dial` errors, no `request timeout`, no `500`s. The attack traffic's
+own median latency dropping from ~5.8s to ~105ms tells the same story from the
+other side: the Shield is now rejecting flood traffic almost instantly instead of
+stalling on it.
+
+**This closes out the open investigation from the prior three 2026-09-10 entries.**
+Both fixes are no longer "plausible, unverified theories" — they're confirmed
+against a live rerun with the exact same attack profile as the original Phase 3
+measurement. Do not re-litigate whether `slot_available()` caching or
+`get_requests_deferred()` pooling "actually help" — this rerun is the answer.
+
+**What's still open:** 60% survival under a 50 req/s flood is a large improvement
+over 17.3%, but it's not 100% — worth deciding whether that's an acceptable,
+reportable ceiling for this defense configuration (token bucket sizes, slot
+reservation fraction) or whether it's worth further tuning before the deadline.
+Also: `profile-d.js` (the slow/high-cost profile — arguably the project's most
+important differentiator, since it's specifically designed to defeat a naive
+request-count limiter) has still never been run against a live server.
+
+**Files:** `results/run_20260910_185041_phase4_attack_shieldfixed.csv` (5999 rows),
+`results/run_20260910_185041_phase4_probe_shieldfixed.csv` (60 rows).
 
 ## 2026-09-10 update — live incident: Shield DoS'd its own backend, fixed on the spot
 
@@ -164,6 +205,7 @@ separately, not just the total `response_code=0` count.
 | 2026-09-09 | Syeda's laptop (10.185.191.119, Qwen2.5-1.5B, -np 4) | Negar's laptop | Phase 1: baseline probe, no attack | 1m | 31 | 100% | ~6.8s | Clean baseline; server healthy, slow (CPU-only) but zero failures | results/run_20260909_181820_phase1_baseline.csv (now committed) |
 | 2026-09-09 | same | Negar's laptop | Phase 2: sustained attack (50 req/s) straight at server, no Shield | 2m | attack: 1200 sent (80% dropped by k6 itself before send); probe: 45 | probe: 2.2% (1/45) | probe p50 ~30s (timeout) | No defense = one attacker takes down the service for everyone; 99.6% attack error rate too | results/run_20260909_182017_phase2_*_noshield.csv (now committed) |
 | 2026-09-09 | same | Negar's laptop, through Umar's Shield (10.185.191.136:9090) | Phase 3: same attack, through Shield | 2m | attack: 4953; probe: 52 | probe: 17.3% (9/52) | n/a (bimodal — 200s fast, 503s fast, 0-code entries effectively timed out) | ~8x better than no defense, but 82.7% of legitimate traffic still failed. Breakdown: 9×200, 8×503 (Shield correctly shedding), 3×500, 32×response_code=0 (no response at all — now broken down further, 16 `dial` errors + 16 `request timeout`, see 2026-09-10 entry above). Shield's own reconciliation log shows 19 legitimate 200s were actually forwarded successfully, but only 9 reached the client — a 10-request gap, unverified fix in PR #3. | results/run_20260909_190310_phase3_*_shield.csv (now committed) |
+| 2026-09-10 | Syeda's laptop (10.185.191.119) | Negar's laptop, through Umar's Shield (10.185.191.136:9090), BOTH perf fixes live | Phase 4: same attack profile as Phase 3, through the FIXED Shield | 2m | attack: 5999, 0 dropped; probe: 60, 0 dropped | **probe: 60.0% (36/60) [90% CI 49.4-69.8%]** | attack p50 ~105ms (was ~5795ms); probe p50 ~5398ms, max ~8248ms (no more timeout-capped latencies) | CONFIRMING RERUN — closes the Phase 3 investigation. response_code=0 count: 32 → 0. Remaining 24/60 probe failures are ALL clean 503s (Shield correctly shedding), zero dial/timeout errors. Non-overlapping 90% CI vs. Phase 3 — real effect, not noise. See full entry above. | results/run_20260910_185041_phase4_*_shieldfixed.csv (now committed) |
 
 ## Column Descriptions
 

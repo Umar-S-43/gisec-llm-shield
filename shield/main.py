@@ -146,13 +146,22 @@ _in_flight = {"legitimate": 0, "default": 0}
 
 app = FastAPI(title="Shield Proxy")
 
-# Shared, connection-pooled client for slot_available() ONLY — see that function's
-# docstring and docs/MANUAL_CONFIG.md for why this exists. Deliberately scoped
-# narrowly: get_requests_deferred(), _do_forward(), and the /metrics proxy below
-# still open a fresh httpx.AsyncClient() per call, which is the same inefficiency
-# in principle but was left untouched here on purpose — this fix targets exactly
-# the code path implicated in the Phase 3 investigation, not a general refactor.
+# Shared, connection-pooled clients for slot_available() and get_requests_deferred().
+# PR #3 originally pooled slot_available() only and deliberately left
+# get_requests_deferred() on a fresh-client-per-call pattern ("not a general
+# refactor"). Live testing on 2026-09-10 showed that was a mistake: under a real
+# flood, many requests can miss get_requests_deferred()'s 0.5s cache in the same
+# instant (before any of them writes back) and each fires its own unpooled
+# connection to llama-server's /metrics — observed as 2,000+ simultaneous
+# connections from the Shield's own host against a 4-slot server, burying it
+# hard enough that even /health stopped responding. Pooling this one too doesn't
+# eliminate the cache-miss race (still possible under extreme concurrency), but
+# it removes the fresh-TCP-handshake-per-miss cost that was turning a brief race
+# into a sustained pile-up. _do_forward() and the /metrics proxy still open a
+# fresh client per call — not implicated in this incident (most requests were
+# shed by slot reservation before ever reaching _do_forward) and left alone.
 _slot_check_client = httpx.AsyncClient()
+_deferred_check_client = httpx.AsyncClient()
 
 
 # --- Cost estimation -------------------------------------------------------
@@ -230,13 +239,12 @@ async def get_requests_deferred() -> int:
         return _deferred_cache["value"]
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{settings.llama_server_url}/metrics",
-                timeout=settings.metrics_poll_timeout,
-            )
-            match = re.search(r"^llamacpp:requests_deferred\s+(\d+)", response.text, re.MULTILINE)
-            value = int(match.group(1)) if match else 0
+        response = await _deferred_check_client.get(
+            f"{settings.llama_server_url}/metrics",
+            timeout=settings.metrics_poll_timeout,
+        )
+        match = re.search(r"^llamacpp:requests_deferred\s+(\d+)", response.text, re.MULTILINE)
+        value = int(match.group(1)) if match else 0
     except Exception as e:
         logger.warning(f"Failed to scrape /metrics for requests_deferred: {e}")
         value = 0  # fail open on the metrics scrape; /slots check below is authoritative
@@ -493,8 +501,9 @@ async def proxy(request: Request, path: str):
 
 
 @app.on_event("shutdown")
-async def _close_slot_check_client():
+async def _close_pooled_clients():
     await _slot_check_client.aclose()
+    await _deferred_check_client.aclose()
 
 
 @app.get("/health")

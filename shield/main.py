@@ -87,9 +87,22 @@ class Settings(BaseSettings):
 
     metrics_poll_timeout: float = 2.0
 
+    # Cache TTL for slot_available()'s /slots?fail_on_no_slot=1 result — see
+    # docs/MANUAL_CONFIG.md. Mirrors get_requests_deferred()'s existing
+    # _DEFERRED_CACHE_TTL pattern. Kept configurable (not a hardcoded constant)
+    # because the right value depends on real attack-load measurements we don't
+    # have yet as of this commit — see commit message for status.
+    slot_check_ttl: float = 0.5
+
     class Config:
         env_file = ".env"
         case_sensitive = False
+        # This repo's .env is shared across Shield, loadgen, and run_comparison.sh
+        # (SHIELD_URL, SHIELD_PORT for other tools, etc.) — pydantic-settings
+        # defaults to rejecting any .env key it can't map to a declared field,
+        # which crashes the Shield on startup for keys that are legitimately
+        # meant for other components. Ignore, don't forbid, unknown keys.
+        extra = "ignore"
 
 
 settings = Settings()
@@ -100,7 +113,13 @@ if not settings.llama_server_url:
 logger.info(f"Shield proxy configured to forward to: {settings.llama_server_url}")
 logger.info(f"Shield active (defense-on): {settings.shield_active}")
 
-if "TOTAL_LLAMA_SLOTS" not in os.environ:
+if "total_llama_slots" not in settings.model_fields_set:
+    # NOTE: checking os.environ here would be wrong — pydantic-settings loads
+    # values from .env directly into the model without ever populating
+    # os.environ, so that check would warn even when TOTAL_LLAMA_SLOTS *is*
+    # correctly set in .env. model_fields_set reflects the model's actual
+    # source-of-truth regardless of whether the value came from .env, a real
+    # env var, or neither.
     logger.warning(
         f"TOTAL_LLAMA_SLOTS not set — using default {settings.total_llama_slots}. "
         f"This MUST match the -np value service/start.sh passes to llama-server, "
@@ -126,6 +145,14 @@ logger.info(
 _in_flight = {"legitimate": 0, "default": 0}
 
 app = FastAPI(title="Shield Proxy")
+
+# Shared, connection-pooled client for slot_available() ONLY — see that function's
+# docstring and docs/MANUAL_CONFIG.md for why this exists. Deliberately scoped
+# narrowly: get_requests_deferred(), _do_forward(), and the /metrics proxy below
+# still open a fresh httpx.AsyncClient() per call, which is the same inefficiency
+# in principle but was left untouched here on purpose — this fix targets exactly
+# the code path implicated in the Phase 3 investigation, not a general refactor.
+_slot_check_client = httpx.AsyncClient()
 
 
 # --- Cost estimation -------------------------------------------------------
@@ -219,18 +246,50 @@ async def get_requests_deferred() -> int:
     return value
 
 
+_slot_cache = {"value": True, "checked_at": 0.0}
+
+
 async def slot_available() -> bool:
-    """Authoritative check: llama-server returns non-200 from /slots?fail_on_no_slot=1 when full."""
+    """
+    Authoritative check: llama-server returns non-200 from /slots?fail_on_no_slot=1
+    when full.
+
+    PERFORMANCE FIX (unverified as of this commit — see commit message): previously
+    this created a brand-new httpx.AsyncClient() and made a fresh network round trip
+    on EVERY incoming request, with no cache. Under the Phase 3 sustained-flood test
+    (50 req/s straight at the Shield), with llama-server itself already saturated by
+    ~4,950 attack requests, this was theorized to queue up on the Shield's single
+    asyncio event loop (no worker pool — see shield/main.py's uvicorn.run() call) and
+    contribute to both observed failure modes: client-side timeouts and TCP-level
+    connection failures. This is a plausible, code-reading-based theory, NOT confirmed
+    by a rerun yet.
+
+    Two changes, mirroring get_requests_deferred()'s existing _DEFERRED_CACHE_TTL
+    pattern: (1) cache the result for settings.slot_check_ttl seconds so concurrent
+    requests within that window reuse one answer instead of each firing a fresh
+    /slots call; (2) use the shared, connection-pooled _slot_check_client instead of
+    opening a new client (and paying a fresh TCP/connection-pool setup cost) per call.
+
+    Does NOT change what counts as "admit" vs "shed" — same 200-means-available
+    logic, same fail-open-on-error behavior as before.
+    """
+    now = time.time()
+    if now - _slot_cache["checked_at"] < settings.slot_check_ttl:
+        return _slot_cache["value"]
+
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{settings.llama_server_url}/slots?fail_on_no_slot=1",
-                timeout=settings.metrics_poll_timeout,
-            )
-            return response.status_code == 200
+        response = await _slot_check_client.get(
+            f"{settings.llama_server_url}/slots?fail_on_no_slot=1",
+            timeout=settings.metrics_poll_timeout,
+        )
+        value = response.status_code == 200
     except Exception as e:
         logger.warning(f"Failed to check /slots: {e}")
-        return True  # optimistic fail-open if llama-server is briefly unreachable
+        value = True  # optimistic fail-open if llama-server is briefly unreachable
+
+    _slot_cache["value"] = value
+    _slot_cache["checked_at"] = now
+    return value
 
 
 # --- Estimate-vs-actual reconciliation (log-only, no bucket feedback) ------
@@ -431,6 +490,11 @@ async def _do_forward(
 @app.post("/{path:path}")
 async def proxy(request: Request, path: str):
     return await forward_request(request)
+
+
+@app.on_event("shutdown")
+async def _close_slot_check_client():
+    await _slot_check_client.aclose()
 
 
 @app.get("/health")

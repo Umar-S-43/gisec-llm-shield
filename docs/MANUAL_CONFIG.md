@@ -20,6 +20,42 @@ a constant, or a `.env` value.
 | Model filename (`Mistral-7B-Instruct-v0.1.Q4_K_M.gguf`) | `service/start.sh` (`MODEL_PATH` default) **and** `service/README.md` (download/`wget`/`mv` instructions) | The default `start.sh` expects to find exactly the file the README tells you to download | If someone downloads a different quantization/model without updating both places, `start.sh` fails at its own "model file not found" check — annoying but at least loud, not silent. Listed here anyway because it's plain-text duplication with no single source of truth. |
 | Documented flag values in prose (`-np 4`, `-t 4`, `-c 4096`) | `service/README.md` (written out as bullet points) **and** `service/start.sh` (`NUM_PARALLEL`/`NUM_THREADS`/`CONTEXT_SIZE` defaults, the actual source of truth) | The README's bullet list is meant to describe what `start.sh` actually does | If `start.sh`'s defaults change and the README bullets aren't updated, the README silently becomes wrong documentation — no functional break, but anyone reading the README instead of the script will be misled about what's actually running. Updated alongside the `-c` fix above (2026-09-09) so this row doesn't itself go stale. |
 
+## Performance tuning knobs — implemented but unverified against real load
+
+Unlike the table above, these aren't cross-file sync pairs — each is a single
+tunable with no "other side" to drift out of sync with. Listed here because they
+were changed in response to a specific incident and haven't been confirmed to
+actually fix it yet; don't cite these as "fixed" in the report until a rerun says so.
+
+- **`SLOT_CHECK_TTL`** (`shield/main.py` → `Settings.slot_check_ttl`, env:
+  `SLOT_CHECK_TTL`, default **0.5s**) — added 2026-09-10, after the Phase 3
+  sustained-flood test (50 req/s through the Shield, `llama-server` saturated by
+  ~4,950 attack requests) showed a large gap between requests the Shield's own
+  reconciliation log recorded as successfully forwarded (19 legitimate-tier 200s)
+  and what the k6 client actually observed as successes (9). The theory: before
+  this fix, `slot_available()` opened a brand-new `httpx.AsyncClient()` and made an
+  uncached network round trip to `/slots?fail_on_no_slot=1` on **every single
+  incoming request**, with up to `metrics_poll_timeout` (2s) to wait — on the
+  Shield's single asyncio event loop (no worker pool), this could plausibly queue
+  up under flood volume and delay responses (including already-successful ones)
+  past the client's own timeout.
+
+  **Status: implemented, NOT confirmed.** The fix mirrors `get_requests_deferred()`'s
+  existing cache pattern (short TTL + shared connection-pooled client instead of a
+  fresh one per call) but changes nothing about admission logic — same
+  200-means-available check, same fail-open behavior. Confirming this requires
+  rerunning the *same* Phase 3 profile (same seed/schedule where possible) and
+  comparing the `response_code: 0` ("no response at all") count before vs. after.
+  If that count doesn't drop meaningfully, this fix should be written up as "did
+  not resolve it" rather than left silently claiming success — see the
+  investigation notes for what else was ruled in/out (e.g. whether the results
+  folder being inside a OneDrive-synced directory was a contributing factor,
+  independent of this code path).
+
+  0.5s was chosen to match `get_requests_deferred()`'s existing `_DEFERRED_CACHE_TTL`
+  for consistency, not because 0.5s specifically was measured to be correct here —
+  tune it once real rerun data exists rather than guessing a "better" number now.
+
 ## Unsure — flagging rather than deciding
 
 These looked like the same category of problem, but they're tuning assumptions

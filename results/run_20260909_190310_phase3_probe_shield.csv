@@ -1,0 +1,53 @@
+timestamp,request_type,response_code,latency_ms,error_message,priority,server_url,run_order
+2026-09-09T15:03:15+00:00,completion,503,533.853100,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:16+00:00,completion,503,317.765700,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:19+00:00,completion,503,510.584000,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:19+00:00,completion,200,8613.345900,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:21+00:00,completion,200,8721.238000,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:28+00:00,completion,200,8187.897800,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:34+00:00,completion,200,11362.627300,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:44+00:00,completion,200,19990.622000,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:49+00:00,completion,200,16683.221400,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:53+00:00,completion,200,18808.009100,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:56+00:00,completion,0,29986.408100,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:57+00:00,completion,500,8443.300800,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:03:58+00:00,completion,0,29964.861400,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:00+00:00,completion,0,29987.368700,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:01+00:00,completion,500,11105.592200,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:02+00:00,completion,500,5521.713500,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:03+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:07+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:08+00:00,completion,0,29991.678900,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:15+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:19+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:25+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:27+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:29+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:30+00:00,completion,0,26985.660800,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:32+00:00,completion,0,28985.472500,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:33+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:40+00:00,completion,0,22976.358200,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:41+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:44+00:00,completion,0,26976.328200,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:46+00:00,completion,0,28988.649300,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:52+00:00,completion,0,22943.276000,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:53+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:56+00:00,completion,0,26942.948500,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:58+00:00,completion,0,28973.794700,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:04:59+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:00+00:00,completion,0,22964.011500,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:03+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:04+00:00,completion,0,26977.502300,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:05+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:06+00:00,completion,0,28981.867100,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:07+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:09+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:17+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:18+00:00,completion,503,8625.007100,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:18+00:00,completion,503,8625.007100,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:19+00:00,completion,503,5449.411900,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:19+00:00,completion,503,5476.062400,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:19+00:00,completion,503,229.377900,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:24+00:00,completion,0,14976.857200,request timeout,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:25+00:00,completion,200,24911.645600,,legitimate,http://10.185.191.136:9090/completion,3
+2026-09-09T15:05:31+00:00,completion,200,21866.016300,,legitimate,http://10.185.191.136:9090/completion,3

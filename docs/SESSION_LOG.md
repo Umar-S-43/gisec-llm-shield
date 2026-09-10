@@ -16,21 +16,24 @@ Record each test run here with metadata, results, and observations. Use this to 
   no attack) — 100% survival. Phase 2 (sustained attack, no Shield) — 2.2% legitimate
   survival, service effectively down. Phase 3 (same attack, through the Shield) —
   17.3% legitimate survival (~8x better than no defense, but far from complete).
-- **Open investigation, NOT resolved:** Phase 3's failures don't cleanly break down.
-  Of 32 `response_code=0` ("no response at all") entries, only 10 are explained by
-  a specific, plausible-but-UNVERIFIED theory (uncached `/slots` checks queuing up
-  on the Shield's single-event-loop, delaying already-successful responses past the
-  client's timeout) — see PR #3. The other 22 are completely unaccounted for; the
-  k6 raw error-string data needed to investigate them was never obtained (lives on
-  Negar's machine, never copied over). Also unresolved: the Shield's results folder
+- **Open investigation, partially resolved 2026-09-10:** the raw k6 error-string
+  data for Phase 3's 32 `response_code=0` entries has now been recovered and
+  committed (see the 2026-09-10 entry below "Negar's raw k6 CSVs recovered") — it
+  splits cleanly 16/16 into `dial: errno 10060` (TCP handshake never acknowledged;
+  points at Shield-side saturation, targeted by PR #3) vs `request timeout`
+  (connection succeeded, no response in time; targeted by the `probe.js` timeout
+  fix). Both existing fixes now have a specific, distinct sub-count to check against
+  in a rerun, instead of one explaining 10 and 22 being a total mystery. Still
+  UNVERIFIED without that rerun. Also still unresolved: the Shield's results folder
   sits inside a OneDrive-synced directory, a live confirmed variable that was never
   ruled in or out as a contributing cause.
-- **Next actions, in priority order:** (1) merge PR #3 or decide against it, (2)
-  get k6's raw `--out csv` output from Phase 3 to break down the other 22 failures
-  by actual error type, (3) rerun the identical Phase 3 profile and compare the
-  `response_code=0` count before/after PR #3 — this is the only thing that can
-  confirm or refute that fix, (4) test `profile-d.js` (slow/high-cost), never run
-  yet, (5) get Syeda to push her real `service/start.sh` config for the record.
+- **Next actions, in priority order:** (1) merge PR #3 (and the `probe.js` timeout
+  fix) or decide against them, (2) ~~get k6's raw output~~ DONE 2026-09-10 — see
+  entry below, (3) rerun the identical Phase 3 profile and check the `dial`-error
+  and `request timeout` counts SEPARATELY, not just the total `response_code=0`
+  count — that's what actually confirms or refutes each fix individually, (4) test
+  `profile-d.js` (slow/high-cost), never run yet, (5) get Syeda to push her real
+  `service/start.sh` config for the record.
 - **Full detail:** `docs/MANUAL_CONFIG.md` has the dated, itemized history of every
   config value that had to be fixed this way (context size, Shield timeout, `-np`
   sync) — read it before touching any threshold or flag.
@@ -78,13 +81,69 @@ Record each test run here with metadata, results, and observations. Use this to 
   `llama-server` instance is running to test PR #3 against. Both require a session
   with the team's laptops present.
 
+## 2026-09-10 update — Negar's raw k6 CSVs recovered; response_code=0 breakdown by actual error string
+
+This resolves the "k6 raw error-string data ... never obtained" blocker noted above and in the PR #3
+review — the data was sitting on my machine from the original 2026-09-09 run; committing it now
+(see file list at the end of this entry) so it doesn't have to be re-requested or re-run to get.
+
+**Exact breakdown of all 32 `response_code=0` entries from Phase 3's probe run**, pulled from the
+`error_message` column `loadgen/normalize_csv.py` already preserves from k6's raw output (no rerun
+needed — this was extractable from data already on hand):
+
+```
+error_message                                                                    count
+request timeout                                                                     16
+dial: unknown errno 10060 (connected party did not properly respond in time)        16
+```
+
+**What this changes about the "10 explained / 22 unexplained" framing above:** the two error types are
+mechanically different and point at different layers, which the status/count alone couldn't distinguish:
+
+- **`dial: errno 10060` (16 of 32):** the TCP handshake itself was never acknowledged — no connection
+  was ever established. This can ONLY be a server/Shield-side saturation symptom (the listening
+  socket's accept queue), never a client-timeout-value problem. These 16 are consistent with — and
+  don't need any explanation beyond — PR #3's `slot_available()` single-event-loop theory. Raising
+  `probe.js`'s client timeout (the 2026-09-10 fix above) cannot fix these; only PR #3's fix (or
+  something else that reduces Shield-side saturation) can.
+- **`request timeout` (16 of 32):** the connection DID succeed; k6 waited out its full client-side
+  timeout with no response body. At the time of this run, that timeout was still `probe.js`'s
+  unfixed `30s` — meaning these 16 are exactly the failure mode the 2026-09-10 `probe.js` fix
+  (30s → 130s) targets. Whether they'd have succeeded under a 130s timeout is unverified without a
+  rerun, but they are no longer a mystery category — they're the expected signature of a client
+  timeout shorter than the Shield's own 130.0s forward-timeout ceiling.
+
+So the honest updated picture: 16 of the 32 (`dial` errors) need PR #3 (or an equivalent Shield-side
+fix) to improve; the other 16 (`request timeout`) need the `probe.js` timeout fix already made; **both
+independently discovered fixes target real, distinct, now-identified parts of the same 32-count gap**,
+rather than one fix explaining 10 and 22 remaining a mystery. This is still not proof either fix works
+— that still requires the live rerun both prior entries already call for — but it substantially narrows
+what that rerun needs to check: does the `dial`-error count drop after PR #3, and does the
+`request timeout` count drop after the `probe.js` fix, independently of each other.
+
+**Files committed** (the normalized per-request CSVs only — see each file's `error_message` column for
+the raw k6 strings above; the much larger raw `--out csv` k6 dumps and `.log`/`.json` files were left
+out, consistent with this repo's own `.gitignore` reasoning that `/results` should stay
+small/regenerable, and nothing in them isn't already captured in these normalized files):
+- `results/run_20260909_181820_phase1_baseline.csv` (Phase 1, 31 rows)
+- `results/run_20260909_182017_phase2_attack_noshield.csv` (Phase 2 attack, 1200 rows)
+- `results/run_20260909_182017_phase2_probe_noshield.csv` (Phase 2 probe, 45 rows)
+- `results/run_20260909_190310_phase3_attack_shield.csv` (Phase 3 attack, 4953 rows)
+- `results/run_20260909_190310_phase3_probe_shield.csv` (Phase 3 probe, 52 rows — the one referenced
+  above)
+
+**Updated next actions:** item (2) from the status block above ("get k6's raw output to break down the
+22 failures") is done as of this entry. (1) and (3) — decide on PR #3 and rerun Phase 3 to confirm both
+fixes — still stand, and should now check both the `dial`-error and `request timeout` counts
+separately, not just the total `response_code=0` count.
+
 ## Run Table
 
 | Date | Server Host | Load Generator Host | Scenario | Duration | Requests | Success Rate | p95 Latency | Key Findings | File |
 |------|-------------|---------------------|----------|----------|----------|--------------|-------------|--------------|------|
-| 2026-09-09 | Syeda's laptop (10.185.191.119, Qwen2.5-1.5B, -np 4) | Negar's laptop | Phase 1: baseline probe, no attack | 1m | 31 | 100% | ~6.8s | Clean baseline; server healthy, slow (CPU-only) but zero failures | results/run_20260909_181820_phase1_baseline.csv (Negar's machine) |
-| 2026-09-09 | same | Negar's laptop | Phase 2: sustained attack (50 req/s) straight at server, no Shield | 2m | attack: 1200 sent (80% dropped by k6 itself before send); probe: 45 | probe: 2.2% (1/45) | probe p50 ~30s (timeout) | No defense = one attacker takes down the service for everyone; 99.6% attack error rate too | results/run_20260909_182017_phase2_*_noshield.csv (Negar's machine) |
-| 2026-09-09 | same | Negar's laptop, through Umar's Shield (10.185.191.136:9090) | Phase 3: same attack, through Shield | 2m | attack: 4953; probe: 52 | probe: 17.3% (9/52) | n/a (bimodal — 200s fast, 503s fast, 0-code entries effectively timed out) | ~8x better than no defense, but 82.7% of legitimate traffic still failed. Breakdown: 9×200, 8×503 (Shield correctly shedding), 3×500, 32×response_code=0 (no response at all — see investigation notes above). Shield's own reconciliation log shows 19 legitimate 200s were actually forwarded successfully, but only 9 reached the client — a 10-request gap, unverified fix in PR #3. | results/run_20260909_190310_phase3_*_shield.csv (Negar's machine — not copied to this repo's /results, which only has the Shield's own results/shield_reconciliation_*.csv from this same session) |
+| 2026-09-09 | Syeda's laptop (10.185.191.119, Qwen2.5-1.5B, -np 4) | Negar's laptop | Phase 1: baseline probe, no attack | 1m | 31 | 100% | ~6.8s | Clean baseline; server healthy, slow (CPU-only) but zero failures | results/run_20260909_181820_phase1_baseline.csv (now committed) |
+| 2026-09-09 | same | Negar's laptop | Phase 2: sustained attack (50 req/s) straight at server, no Shield | 2m | attack: 1200 sent (80% dropped by k6 itself before send); probe: 45 | probe: 2.2% (1/45) | probe p50 ~30s (timeout) | No defense = one attacker takes down the service for everyone; 99.6% attack error rate too | results/run_20260909_182017_phase2_*_noshield.csv (now committed) |
+| 2026-09-09 | same | Negar's laptop, through Umar's Shield (10.185.191.136:9090) | Phase 3: same attack, through Shield | 2m | attack: 4953; probe: 52 | probe: 17.3% (9/52) | n/a (bimodal — 200s fast, 503s fast, 0-code entries effectively timed out) | ~8x better than no defense, but 82.7% of legitimate traffic still failed. Breakdown: 9×200, 8×503 (Shield correctly shedding), 3×500, 32×response_code=0 (no response at all — now broken down further, 16 `dial` errors + 16 `request timeout`, see 2026-09-10 entry above). Shield's own reconciliation log shows 19 legitimate 200s were actually forwarded successfully, but only 9 reached the client — a 10-request gap, unverified fix in PR #3. | results/run_20260909_190310_phase3_*_shield.csv (now committed) |
 
 ## Column Descriptions
 

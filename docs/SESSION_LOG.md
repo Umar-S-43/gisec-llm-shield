@@ -38,6 +38,26 @@ Record each test run here with metadata, results, and observations. Use this to 
   config value that had to be fixed this way (context size, Shield timeout, `-np`
   sync) — read it before touching any threshold or flag.
 
+## 2026-09-10 update — live incident: Shield DoS'd its own backend, fixed on the spot
+
+- During today's live test session (PR #3 already merged), Behzad's attack traffic
+  through the Shield left `llama-server` completely unreachable — even `/health`
+  timed out from Syeda's own machine, process alive but not answering.
+- Syeda diagnosed 2,000+ simultaneous connections to `llama-server:8080`, all from
+  a **single IP: the Shield's own host**, not the attacker's machine. The Shield
+  was DoS-ing its own backend, not defending against the attack.
+- **Root cause:** `get_requests_deferred()` still had the exact fresh-`httpx.AsyncClient()`
+  -per-call pattern PR #3 fixed in `slot_available()` — PR #3 deliberately scoped
+  that fix narrowly and left this sibling function untouched. Under real flood
+  concurrency, many requests missed its 0.5s cache in the same instant and each
+  fired its own unpooled connection to `/metrics` — exactly the pile-up observed.
+- **Fixed live and pushed** (`b390503`): pooled `get_requests_deferred()`'s client
+  the same way PR #3 pooled `slot_available()`'s. Shield restarted with the fix
+  before resuming the test. `llama-server` confirmed recovered (`/health` 200)
+  once the flood stopped.
+- Traffic paused during the fix; test resumed after restart. See the Run Table
+  for today's actual results once available.
+
 ## 2026-09-10 update — found and fixed a second timeout-mismatch bug (probe.js)
 
 - Investigated why Phase 3's k6 timeouts were seen at 30s when the Shield/loadgen

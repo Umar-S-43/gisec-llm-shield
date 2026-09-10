@@ -35,6 +35,49 @@ Record each test run here with metadata, results, and observations. Use this to 
   config value that had to be fixed this way (context size, Shield timeout, `-np`
   sync) — read it before touching any threshold or flag.
 
+## 2026-09-10 update — found and fixed a second timeout-mismatch bug (probe.js)
+
+- Investigated why Phase 3's k6 timeouts were seen at 30s when the Shield/loadgen
+  timeout pairing was supposedly fixed to 130s/120s on 2026-09-09.
+- **Root cause: `loadgen/profiles/probe.js` (the legitimate-cohort script Phase 3
+  actually measured) was never updated** — only `profile-d.js` got the 2026-09-09
+  fix. `probe.js` was still at its original `timeout: '30s'`, well under the
+  Shield's 130.0s forward-timeout ceiling. Any probe request the Shield legitimately
+  took >30s to service under Phase 3's flood load would read to k6 as
+  `response_code=0` even if the Shield/server would have answered correctly —
+  likely a real contributor to the 22 previously-unexplained failures, separate
+  from and in addition to the PR #3 `slot_available()` theory.
+- **Fixed:** `probe.js`'s timeout raised `30s` → `130s`, same "comfortably above
+  the Shield's ceiling" pairing as `profile-d.js`. See `docs/MANUAL_CONFIG.md`
+  for the full writeup and a note flagging `baseline.js`/`spike.js`/`sustained.js`
+  (still at `60s`) for the same check if they're ever used to measure
+  legitimate-cohort survival under heavy load.
+- **This is UNVERIFIED like PR #3** — same situation: no live server this session
+  to confirm it actually reduces the `response_code=0` count. Should be tested in
+  the same live Phase 3 rerun as PR #3, not treated as resolved yet.
+
+## 2026-09-10 update — PR #3 code review (no live server available this session)
+
+- Reviewed PR #3's full diff (`shield/main.py`, docs) statically — no `llama-server`
+  or team members reachable this session to run the confirming rerun.
+- **Finding: code is correct and low-risk.** `slot_available()`'s caching + pooled
+  client changes leave admission/shedding logic untouched (same `200 == available`
+  check, same fail-open-on-exception behavior); the two startup bugfixes
+  (`extra="ignore"`, `model_fields_set` check) match what was already verified live
+  on 2026-09-09. Minor non-blocking note: concurrent cache misses within the same
+  TTL window aren't de-duplicated (two requests can both miss and both fire a
+  `/slots` call before either writes back) — not a regression vs. the old no-cache
+  behavior, not worth fixing before a rerun.
+- **Decision: hold the merge until the live Phase 3 rerun confirms the perf fix**
+  (team's call, not a code-quality blocker) — per the open investigation, the only
+  thing that can actually confirm or refute whether this closes the
+  `response_code=0` gap is comparing that count before vs. after against a live
+  server, and merging early wouldn't change what that rerun still needs to prove.
+- Still blocked, same as before: Negar's raw k6 CSVs (needed for the other 22
+  unexplained failures) were never copied off her machine, and no live
+  `llama-server` instance is running to test PR #3 against. Both require a session
+  with the team's laptops present.
+
 ## Run Table
 
 | Date | Server Host | Load Generator Host | Scenario | Duration | Requests | Success Rate | p95 Latency | Key Findings | File |

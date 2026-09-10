@@ -59,7 +59,12 @@ export default function () {
             request_type: 'completion',
             priority: 'legitimate',
         },
-        timeout: '30s',
+        // Must stay comfortably ABOVE the Shield's forward timeout (130.0s in
+        // shield/main.py's _do_forward) — otherwise k6 gives up on a legitimate
+        // request before the Shield could still deliver a real answer, and it
+        // misreads as a Shield/server failure (response_code=0) rather than a
+        // client-side timeout mismatch. See docs/MANUAL_CONFIG.md.
+        timeout: '130s',
     };
 
     const res = http.post(`${SERVER_URL}/completion`, payload, params);

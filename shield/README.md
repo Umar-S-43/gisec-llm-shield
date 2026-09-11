@@ -1,21 +1,29 @@
 # Shield: Cost-Aware Reverse Proxy with Admission Control
 
 FastAPI-based reverse proxy implementing four defense checks (see CLAUDE.md), applied
-at runtime in this order — each check only runs once the previous one has already
-confirmed the request should proceed, so nothing gets charged/reserved for a request
-about to be rejected for a different reason:
+at runtime in this order: **A → C → B** (changed 2026-09-11; was B → C → A).
 
-**1. (B) Queue-aware load shedding** — polls `llamacpp:requests_deferred` from
-llama-server's `/metrics` (cached, not per-request) and short-circuits with `503`
-before the real server's queue backs up. Falls back to the authoritative
-`/slots?fail_on_no_slot=1` check when the deferred count looks borderline.
+**1. (A) Token-budget admission control** — checked first, so every request's cost is
+judged before any capacity/queue concern, matching the project's core thesis (price
+the request, not just the slot) as directly as possible. Rejects requests based on
+their *estimated cost* (prompt tokens + requested output tokens), not just request
+count. This is what catches Profile D (`/loadgen/profiles/profile-d.js`): few
+requests/sec, each one huge. Legitimate and default traffic draw from separate cost
+budgets.
+
+**Known, accepted tradeoff of checking A first:** the token bucket deducts on success
+with no refund path. A request that passes the cost check but is then shed by C or B
+below has already spent real budget for nothing it ever got to use — under sustained
+load, this drains the bucket faster than the previous B → C → A order did, purely
+from requests that never reach `llama-server`. Chosen deliberately anyway, so cost is
+always the first thing evaluated.
 
 **2. (C, concurrency layer) Fixed-fraction slot reservation** — caps how many
 requests per tier may be **in-flight** (forwarded, awaiting response) at once. A
 fraction of `TOTAL_LLAMA_SLOTS` (`LEGITIMATE_SLOT_FRACTION`, default 0.5) is reserved
 exclusively for `X-Priority: legitimate` traffic; default-tier traffic is capped to
 the remaining share and cannot use the reserved portion even when it's idle. This is
-independent of the token buckets below — it gates *concurrency*, not *admission
+independent of the token buckets above — it gates *concurrency*, not *admission
 rate/cost*. Returns `503 {"reason": "..._capacity_..."}` when a tier is full, without
 touching either bucket.
 
@@ -25,14 +33,11 @@ priority-inversion/aging for tiered admission is still open, unresolved work eve
 mature schedulers (see vLLM's own RFCs #6077 and #16969). A fixed reservation with no
 aging is the documented fallback, not an oversight.
 
-**3. (A) Token-budget admission control**, which also carries **(C, admission
-layer)** — rejects requests based on their *estimated cost* (prompt tokens +
-requested output tokens), not just request count. This is what catches Profile D
-(`/loadgen/profiles/profile-d.js`): few requests/sec, each one huge. Legitimate and
-default traffic draw from separate cost budgets (the admission-time half of
-priority-tiered fair queuing; slot reservation above is the concurrency-time half).
-Only runs once (B) and slot reservation have already confirmed the request should
-proceed.
+**3. (B) Queue-aware load shedding** — checked last now. Polls
+`llamacpp:requests_deferred` from llama-server's `/metrics` (cached, not per-request)
+and short-circuits with `503` before the real server's queue backs up. Falls back to
+the authoritative `/slots?fail_on_no_slot=1` check when the deferred count looks
+borderline.
 
 **4. Forward + reconcile** — admitted requests are forwarded, then estimate-vs-actual
 is logged (see below).

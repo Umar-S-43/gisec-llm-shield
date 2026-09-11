@@ -3,27 +3,29 @@ Shield: FastAPI reverse proxy implementing cost-aware admission control.
 
 Reads LLAMA_SERVER_URL from environment (required).
 
-Defense mechanisms (see CLAUDE.md), applied at RUNTIME in this order — each check
-runs only after the previous one has already confirmed the request should proceed,
-so nothing gets charged/reserved for a request that's about to be rejected for a
-different reason anyway:
+Defense mechanisms (see CLAUDE.md), applied at RUNTIME in this order: A -> C -> B
+(changed 2026-09-11; was B -> C -> A):
 
-  1. (B) Queue-aware shedding — watches llamacpp:requests_deferred (scraped from
-     llama-server's own /metrics) and short-circuits with 503 before the real
-     server's queue backs up, using /slots?fail_on_no_slot=1 as the authoritative
-     "is there a slot" check.
+  1. (A) Token-budget check — checked FIRST now, so every request's cost is judged
+     before any capacity/queue concern. Rejects requests whose ESTIMATED COST
+     (prompt tokens + requested output tokens) would blow the caller's budget.
+     Legitimate and default traffic draw from separate token buckets. This budget
+     check is what catches Profile D (few requests/sec, each one huge) that a plain
+     request-counter misses.
+     KNOWN TRADEOFF: TokenBucket.consume() deducts on success with no refund path.
+     A request that passes this check but is then shed by C or B below has already
+     spent real budget for nothing it got to use — under sustained load this drains
+     the bucket faster than the previous order did. Accepted deliberately so cost is
+     always evaluated first.
   2. (C, concurrency layer) Fixed-fraction slot reservation — caps how many
      requests per TIER may be in-flight (forwarded, awaiting response) at once,
-     independent of the token buckets below. Reserves a fraction of
+     independent of the token buckets above. Reserves a fraction of
      TOTAL_LLAMA_SLOTS exclusively for legitimate-tier traffic so attack traffic
      cannot fill every slot even if it has token budget left to spend.
-  3. (A) Token-budget check, which also carries (C, admission layer) — rejects
-     requests whose ESTIMATED COST (prompt tokens + requested output tokens) would
-     blow the caller's budget. Legitimate and default traffic draw from separate
-     token buckets (the admission-time half of priority-tiered fair queuing; the
-     slot reservation above is the concurrency-time half). This budget check is
-     what catches Profile D (few requests/sec, each one huge) that a plain
-     request-counter misses.
+  3. (B) Queue-aware shedding — checked LAST now. Watches llamacpp:requests_deferred
+     (scraped from llama-server's own /metrics) and short-circuits with 503 before
+     the real server's queue backs up, using /slots?fail_on_no_slot=1 as the
+     authoritative "is there a slot" check.
   4. Forward to llama-server, then reconcile estimate vs. actual (admitted
      requests only).
 
@@ -391,31 +393,35 @@ async def forward_request(request: Request) -> JSONResponse:
         logger.info(f"[PASSTHROUGH] {request.method} {request.url.path} priority={priority}")
         return await _do_forward(request, body)
 
-    # (B) Queue-aware shedding runs BEFORE the token budget so a request that gets
-    # shed here never touches the bucket — otherwise it's charged for a request
-    # that never reaches llama-server, draining the budget faster than it should
-    # and skewing probe-cohort survival numbers under sustained load. Check the
-    # deferred gauge first (cheap, cached), fall back to the authoritative /slots
-    # check only when it looks tight.
-    deferred = await get_requests_deferred()
-    shed_threshold = (
-        settings.deferred_shed_threshold_legitimate if priority
-        else settings.deferred_shed_threshold_default
-    )
-    if deferred >= shed_threshold:
-        # Rejected before reaching llama-server — nothing to reconcile, same as above.
-        logger.warning(f"Shedding load: requests_deferred={deferred} >= threshold={shed_threshold} priority={priority}")
-        return JSONResponse({"error": "Service overloaded", "requests_deferred": deferred}, status_code=503)
+    # Pipeline order: A -> C -> B (changed 2026-09-11; was B -> C -> A).
+    #
+    # KNOWN, ACCEPTED TRADEOFF of this order: TokenBucket.consume() deducts
+    # tokens immediately on success, with no refund path. Under the old
+    # B -> C -> A order, a request already known to be doomed (queue too deep,
+    # tier at capacity) never reached the bucket at all, so the budget was only
+    # ever spent on requests that had a real shot at being forwarded. Under
+    # this order, a request that passes the cost check but then gets shed by C
+    # or B has already paid real budget for nothing -- under sustained load,
+    # this bucket drains faster than the previous order did, purely from
+    # requests that never actually reach llama-server. That's a real,
+    # measurable behavior change, not just a reordering of log lines -- if a
+    # future run shows the legitimate/default buckets emptying unusually fast,
+    # this is why.
 
-    if not await slot_available():
-        # Rejected before reaching llama-server — nothing to reconcile, same as above.
-        logger.warning(f"No slot available on llama-server (priority={priority}); shedding")
-        return JSONResponse({"error": "No slots available"}, status_code=503)
+    # (A) Cost-aware token budget -- checked first now, so every request's cost
+    # is judged before any capacity/queue concern, matching the project's core
+    # thesis (price the request, not just the slot) as directly as possible.
+    prompt_cost, output_cost = estimate_request_cost(body)
+    cost = prompt_cost + output_cost
+    bucket = legitimate_bucket if priority else default_bucket
+    if not bucket.consume(cost):
+        # Rejected requests (429/503) never reach llama-server, so there's nothing
+        # to reconcile an estimate against — this is intentional, not a gap.
+        logger.warning(f"Token budget exceeded (cost={cost}, priority={priority}); rejecting")
+        return JSONResponse({"error": "Token budget exceeded", "estimated_cost": cost}, status_code=429)
 
-    # (C, concurrency layer) Fixed-fraction slot reservation. Checked before the
-    # token budget for the same reason as everything else in this pipeline: don't
-    # charge a request that's about to be rejected for a different reason. Neither
-    # bucket is touched here — this only reads/writes _in_flight counters.
+    # (C, concurrency layer) Fixed-fraction slot reservation. Reads/writes only
+    # the _in_flight counters -- no bucket interaction here.
     #
     # NOTE: no wait-time aging — see module docstring for why that's a deliberate
     # cut, not an oversight.
@@ -445,17 +451,21 @@ async def forward_request(request: Request) -> JSONResponse:
                 status_code=503,
             )
 
-    # (A) Cost-aware token budget — only reached once queue-shedding AND slot
-    # reservation have already confirmed this request should proceed, so a shed
-    # or capacity-rejected request never touches the bucket.
-    prompt_cost, output_cost = estimate_request_cost(body)
-    cost = prompt_cost + output_cost
-    bucket = legitimate_bucket if priority else default_bucket
-    if not bucket.consume(cost):
-        # Rejected requests (429/503) never reach llama-server, so there's nothing
-        # to reconcile an estimate against — this is intentional, not a gap.
-        logger.warning(f"Token budget exceeded (cost={cost}, priority={priority}); rejecting")
-        return JSONResponse({"error": "Token budget exceeded", "estimated_cost": cost}, status_code=429)
+    # (B) Queue-aware shedding -- checked last now. Check the deferred gauge
+    # first (cheap, cached), fall back to the authoritative /slots check only
+    # when it looks tight.
+    deferred = await get_requests_deferred()
+    shed_threshold = (
+        settings.deferred_shed_threshold_legitimate if priority
+        else settings.deferred_shed_threshold_default
+    )
+    if deferred >= shed_threshold:
+        logger.warning(f"Shedding load: requests_deferred={deferred} >= threshold={shed_threshold} priority={priority}")
+        return JSONResponse({"error": "Service overloaded", "requests_deferred": deferred}, status_code=503)
+
+    if not await slot_available():
+        logger.warning(f"No slot available on llama-server (priority={priority}); shedding")
+        return JSONResponse({"error": "No slots available"}, status_code=503)
 
     # Admitted — forward, tracking in-flight count for the slot-reservation check
     # above. Incremented right before the call, decremented in `finally` so the

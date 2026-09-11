@@ -9,6 +9,12 @@ By end of workstream session:
 - `proportions.py` — Computes Wilson CI for success rate and error proportions
 - `charts.py` — Generates line/bar charts from raw CSVs
 - `drift_check.py` — Detects thermal drift and cross-session divergence
+- `economics.py` — Research brief's cost formulas (GPU-hour cost/request, cost per
+  1k tokens, denial-of-wallet exposure per attacker-hour, goodput-improvement
+  factor N) and goodput (request- and token-goodput), computed from real measured
+  data in `/results/shield_reconciliation_*.csv` and per-request run CSVs — no
+  invented numbers, see the script's own docstring for exact data sources and the
+  dated price citations used.
 - All scripts read from per-request CSVs in `/results/`
 - One-command invocation for each analysis type
 
@@ -37,6 +43,11 @@ python analysis/compare_on_off.py results/comparison_profile-d_20260908_140000/
 # Verify the CI math itself is correct (known-example + synthetic + fake-CSV
 # end-to-end checks) — run this if you ever touch wilson_ci or bootstrap_ci
 python analysis/verify_ci_functions.py
+
+# Economic framing (GPU-hour cost, cost per 1k tokens, denial-of-wallet
+# exposure, goodput-improvement factor N) and goodput (request- and
+# token-goodput) — all from real measured data, no invented numbers
+python analysis/economics.py
 ```
 
 ## CI Function Signatures

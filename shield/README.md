@@ -60,6 +60,25 @@ python shield/main.py
 
 Listens on `http://localhost:9090` by default.
 
+**For live test sessions, prefer the auto-restarting wrapper instead:**
+
+```bash
+./shield/run_resilient.sh
+# or, if your default `python` doesn't have shield/requirements.txt installed:
+PYTHON_BIN="py -3.11" ./shield/run_resilient.sh
+```
+
+Added 2026-09-11 after the Shield crashed mid-session with `OSError: [WinError
+64] The specified network name is no longer available` — a Windows-level
+socket-accept failure, most likely a momentary phone-hotspot drop (see
+CLAUDE.md's "ephemeral connectivity" section), not a code bug. Nobody was
+watching the terminal when it happened, so it sat dead for a while before
+anyone noticed. The wrapper just restarts `shield/main.py` a couple seconds
+after it exits, so a network blip costs seconds of downtime instead of an
+unnoticed dead Shield for the rest of a run. It is **not** a fix for a real
+crash-causing bug in our own code — if you see the *same* traceback repeating
+on every restart, that's a bug, not a network blip; stop and read it.
+
 ## Testing the Proxy
 
 ```bash

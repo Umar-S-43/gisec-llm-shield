@@ -10,7 +10,11 @@ const SERVER_URL = __ENV.LLAMA_SERVER_URL || 'http://localhost:8080';
 //   preAllocatedVUs = ceil(median_iteration_duration_seconds * rate) + buffer_for_variance
 // MEDIAN_ITERATION_S is an ESTIMATE (n_predict=200, high concurrency) until Day 1's
 // session measures the real value — override via SUSTAINED_MEDIAN_ITERATION_S.
-const RATE = 50;
+// Rate is env-overridable so different attack-rate scenarios don't require
+// editing this file — e.g. SUSTAINED_RATE=10 for a mild-overload run, or
+// SUSTAINED_RATE=100 for a stress test. Also read by demo/server.py's rate
+// slider, when set.
+const RATE = Number(__ENV.SUSTAINED_RATE || 50);
 const MEDIAN_ITERATION_S = Number(__ENV.SUSTAINED_MEDIAN_ITERATION_S || 5);
 const BUFFER_FOR_VARIANCE = 50;
 const PRE_ALLOCATED_VUS = Math.ceil(MEDIAN_ITERATION_S * RATE) + BUFFER_FOR_VARIANCE;

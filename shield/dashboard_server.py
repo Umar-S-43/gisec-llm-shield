@@ -297,6 +297,26 @@ def kill_port_owner(port: int) -> list[str]:
     return killed
 
 
+async def _wait_until_listening(port: int, timeout_s: float = 8.0, poll_interval_s: float = 0.3) -> bool:
+    """Poll for the port coming up instead of one fixed sleep + single check.
+
+    The single-sleep-then-check version reported a false "not listening yet"
+    at least three times live this session even though the Shield had, in
+    fact, come up successfully a moment later -- startup time isn't perfectly
+    constant, so any single fixed wait is a race against however long this
+    particular start happens to take. Polling repeatedly and returning True
+    the instant the port is actually up removes that race; only returns
+    False if it genuinely never comes up within timeout_s.
+    """
+    elapsed = 0.0
+    while elapsed < timeout_s:
+        if find_port_owner_pids(port):
+            return True
+        await asyncio.sleep(poll_interval_s)
+        elapsed += poll_interval_s
+    return bool(find_port_owner_pids(port))
+
+
 @app.post("/api/control/start")
 async def control_start():
     global _shield_proc
@@ -316,8 +336,7 @@ async def control_start():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    await asyncio.sleep(2.5)
-    up = bool(find_port_owner_pids(SHIELD_PORT))
+    up = await _wait_until_listening(SHIELD_PORT)
     return JSONResponse({"ok": up, "message": "Shield started." if up else "Started the process but it doesn't appear to be listening yet -- check shield.log."})
 
 
@@ -368,8 +387,7 @@ async def control_reset():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    await asyncio.sleep(2.5)
-    up = bool(find_port_owner_pids(SHIELD_PORT))
+    up = await _wait_until_listening(SHIELD_PORT)
     return JSONResponse({"ok": up, "message": "Shield reset: log cleared, restarted fresh." if up else "Reset attempted but Shield doesn't appear to be listening -- check shield.log."})
 
 

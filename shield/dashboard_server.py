@@ -41,8 +41,9 @@ SHIELD_URL = f"http://localhost:{SHIELD_PORT}"
 LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "").rstrip("/")
 DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", "8765"))
 SHIELD_DIR = Path(__file__).parent
+REPO_ROOT = SHIELD_DIR.parent
 LOG_PATH = SHIELD_DIR / "shield.log"
-RESULTS_DIR = SHIELD_DIR.parent / "results"
+RESULTS_DIR = REPO_ROOT / "results"
 
 app = FastAPI(title="Shield Dashboard")
 
@@ -271,13 +272,19 @@ async def control_start():
     if find_port_owner_pids(SHIELD_PORT):
         return JSONResponse({"ok": False, "message": f"Port {SHIELD_PORT} is already in use -- Shield (or something) is already running. Use Reset if it's misbehaving."})
 
+    # cwd MUST be the repo root, not shield/ -- shield/main.py's Settings reads
+    # ".env" as a path relative to the process's cwd at startup. Launching with
+    # cwd=SHIELD_DIR silently pointed it at a nonexistent shield/.env instead of
+    # the real repo-root one, so every env override (LEGITIMATE_SLOT_FRACTION
+    # included) was silently falling back to hardcoded defaults. Caught live
+    # when a .env edit didn't take effect after a dashboard-triggered restart.
     _shield_proc = subprocess.Popen(
-        [sys.executable, "main.py"],
-        cwd=str(SHIELD_DIR),
+        [sys.executable, "shield/main.py"],
+        cwd=str(REPO_ROOT),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(2.5)
     up = bool(find_port_owner_pids(SHIELD_PORT))
     return JSONResponse({"ok": up, "message": "Shield started." if up else "Started the process but it doesn't appear to be listening yet -- check shield.log."})
 
@@ -316,13 +323,19 @@ async def control_reset():
         LOG_PATH.write_text("", encoding="utf-8")
     _history.clear()
 
+    # cwd MUST be the repo root, not shield/ -- shield/main.py's Settings reads
+    # ".env" as a path relative to the process's cwd at startup. Launching with
+    # cwd=SHIELD_DIR silently pointed it at a nonexistent shield/.env instead of
+    # the real repo-root one, so every env override (LEGITIMATE_SLOT_FRACTION
+    # included) was silently falling back to hardcoded defaults. Caught live
+    # when a .env edit didn't take effect after a dashboard-triggered restart.
     _shield_proc = subprocess.Popen(
-        [sys.executable, "main.py"],
-        cwd=str(SHIELD_DIR),
+        [sys.executable, "shield/main.py"],
+        cwd=str(REPO_ROOT),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(2.5)
     up = bool(find_port_owner_pids(SHIELD_PORT))
     return JSONResponse({"ok": up, "message": "Shield reset: log cleared, restarted fresh." if up else "Reset attempted but Shield doesn't appear to be listening -- check shield.log."})
 

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GISEC Shield — Live Attack Demo</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+        background: #0f1117;
+        color: #e6e6e6;
+        margin: 0;
+        padding: 40px 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    .subtitle { color: #9aa0ac; margin-bottom: 28px; font-size: 14px; }
+    .card {
+        background: #171a23;
+        border: 1px solid #2a2f3d;
+        border-radius: 12px;
+        padding: 24px;
+        width: 100%;
+        max-width: 640px;
+        margin-bottom: 20px;
+    }
+    .config-row { display: flex; justify-content: space-between; font-size: 13px; color: #9aa0ac; padding: 4px 0; }
+    .config-row span:last-child { color: #cfd3da; font-family: monospace; }
+
+    .toggle-group { display: flex; gap: 10px; margin: 14px 0; }
+    .toggle-btn {
+        flex: 1;
+        padding: 12px;
+        border-radius: 8px;
+        border: 1px solid #2a2f3d;
+        background: #1c202b;
+        color: #cfd3da;
+        cursor: pointer;
+        text-align: center;
+        font-size: 14px;
+    }
+    .toggle-btn.active { border-color: #5b8def; background: #1a2740; color: #fff; }
+    .toggle-btn.active.attack-mode { border-color: #e5484d; background: #3a1418; color: #fff; }
+
+    select {
+        width: 100%;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #2a2f3d;
+        background: #1c202b;
+        color: #e6e6e6;
+        margin: 8px 0 18px 0;
+        font-size: 14px;
+    }
+
+    button.attack {
+        width: 100%;
+        padding: 18px;
+        font-size: 18px;
+        font-weight: 700;
+        border-radius: 10px;
+        border: none;
+        cursor: pointer;
+        background: #e5484d;
+        color: white;
+        letter-spacing: 0.5px;
+    }
+    button.attack:disabled { background: #5a2a2c; cursor: not-allowed; }
+    button.attack:hover:not(:disabled) { background: #ff5c60; }
+
+    .status {
+        margin-top: 18px;
+        padding: 14px;
+        border-radius: 8px;
+        font-size: 14px;
+        text-align: center;
+    }
+    .status.idle { background: #1c202b; color: #9aa0ac; }
+    .status.running { background: #3a1418; color: #ff8b8e; animation: pulse 1.4s infinite; }
+    .status.done { background: #12261c; color: #7ee2a8; }
+    .status.error { background: #3a1418; color: #ff8b8e; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+    .hidden { display: none; }
+
+    .live-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .live-box { background: #1c202b; border-radius: 8px; padding: 10px; }
+    .live-box .label { color: #9aa0ac; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .live-box .value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+    .live-box .value.good { color: #7ee2a8; }
+    .live-box .value.bad { color: #ff8b8e; }
+
+    canvas { width: 100%; display: block; background: #12141c; border-radius: 8px; }
+    .chart-title { font-size: 12px; color: #9aa0ac; text-transform: uppercase; letter-spacing: 0.5px; margin: 14px 0 6px 0; }
+
+    .survival-number { font-size: 48px; font-weight: 800; text-align: center; margin: 10px 0; }
+    .survival-bar-track { background: #2a2f3d; border-radius: 6px; height: 14px; overflow: hidden; margin-bottom: 16px; }
+    .survival-bar-fill { height: 100%; background: linear-gradient(90deg, #e5484d, #7ee2a8); transition: width 0.6s ease; }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px; }
+    .stat-box { background: #1c202b; border-radius: 8px; padding: 10px; }
+    .stat-box .label { color: #9aa0ac; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-box .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<h1>🛡️ GISEC LLM Shield — Live Attack Demo</h1>
+<div class="subtitle">Press the button. Watch a real attack hit a real server, live.</div>
+
+<div class="card">
+    <div class="config-row"><span>Target server</span><span id="cfg-server">loading...</span></div>
+    <div class="config-row"><span>Shield</span><span id="cfg-shield">loading...</span></div>
+
+    <div class="toggle-group">
+        <div class="toggle-btn attack-mode active" data-mode="shield" onclick="setMode('shield')">🛡️ Through Shield</div>
+        <div class="toggle-btn attack-mode" data-mode="direct" onclick="setMode('direct')">☠️ No Defense</div>
+    </div>
+
+    <select id="profile-select" onchange="onProfileChange()">
+        <option value="sustained">Sustained Flood</option>
+        <option value="profile-d">Slow / High-Cost (Profile D)</option>
+        <option value="spike">Sudden Spike</option>
+    </select>
+
+    <div id="rate-row" style="margin-bottom: 18px;">
+        <label style="font-size: 12px; color: #9aa0ac; display:block; margin-bottom: 6px;">
+            Attack rate: <span id="rate-value">50</span> req/s
+            <span style="color:#666; font-weight:normal;">(server's real capacity is well under 1 req/s for this model — anything here is an overload test)</span>
+        </label>
+        <input type="range" id="rate-slider" min="1" max="200" value="50" style="width:100%"
+               oninput="document.getElementById('rate-value').textContent = this.value">
+    </div>
+
+    <button class="attack" id="attack-btn" onclick="startAttack()">🚨 LAUNCH ATTACK (~2 min)</button>
+
+    <div class="status idle" id="status-box">Idle — ready when you are</div>
+</div>
+
+<div class="card hidden" id="live-card">
+    <div class="live-grid">
+        <div class="live-box"><div class="label">Elapsed</div><div class="value" id="live-elapsed">0s</div></div>
+        <div class="live-box"><div class="label">Attack rate</div><div class="value" id="live-attack-rate">0/s</div></div>
+        <div class="live-box"><div class="label">Legitimate requests sent</div><div class="value" id="live-probe-total">0</div></div>
+        <div class="live-box"><div class="label">Live survival rate</div><div class="value good" id="live-survival">--%</div></div>
+    </div>
+
+    <div class="chart-title">Legitimate Survival Rate Over Time</div>
+    <canvas id="survival-chart" height="140"></canvas>
+
+    <div class="chart-title">Response Codes So Far (probe = legitimate user, attack = flood)</div>
+    <canvas id="codes-chart" height="120"></canvas>
+</div>
+
+<div class="card hidden" id="results-card">
+    <div class="chart-title" style="text-align:center; font-size:14px; margin-bottom: 8px;">Final Result</div>
+    <div class="survival-number" id="survival-number">--%</div>
+    <div class="survival-bar-track"><div class="survival-bar-fill" id="survival-bar" style="width:0%"></div></div>
+    <div class="stat-grid">
+        <div class="stat-box"><div class="label">Legitimate requests</div><div class="value" id="stat-probe-total">-</div></div>
+        <div class="stat-box"><div class="label">Succeeded</div><div class="value" id="stat-probe-success">-</div></div>
+        <div class="stat-box"><div class="label">Median latency (success)</div><div class="value" id="stat-latency">-</div></div>
+        <div class="stat-box"><div class="label">Attack error rate</div><div class="value" id="stat-attack-error">-</div></div>
+    </div>
+</div>
+
+<script>
+let currentMode = "shield";
+let polling = null;
+let survivalHistory = []; // [{t, pct}]
+
+function setMode(mode) {
+    if (document.getElementById("attack-btn").disabled) return;
+    currentMode = mode;
+    document.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
+    document.querySelector(`.toggle-btn[data-mode="${mode}"]`).classList.add("active");
+}
+
+async function loadConfig() {
+    const res = await fetch("/api/config");
+    const cfg = await res.json();
+    document.getElementById("cfg-server").textContent = cfg.llama_server_url || "(not set in .env)";
+    document.getElementById("cfg-shield").textContent = cfg.shield_url || "(not set in .env)";
+}
+
+function onProfileChange() {
+    const profile = document.getElementById("profile-select").value;
+    document.getElementById("rate-row").style.display = profile === "sustained" ? "block" : "none";
+}
+
+async function startAttack() {
+    const btn = document.getElementById("attack-btn");
+    const statusBox = document.getElementById("status-box");
+    const profile = document.getElementById("profile-select").value;
+    const rate = profile === "sustained" ? parseInt(document.getElementById("rate-slider").value, 10) : null;
+
+    btn.disabled = true;
+    survivalHistory = [];
+    document.getElementById("results-card").classList.add("hidden");
+    document.getElementById("live-card").classList.remove("hidden");
+    statusBox.className = "status running";
+    statusBox.textContent = "Starting...";
+
+    const res = await fetch("/api/start-attack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: currentMode, profile: profile, rate: rate }),
+    });
+
+    if (res.status !== 200) {
+        const err = await res.json();
+        statusBox.className = "status error";
+        statusBox.textContent = "Error: " + (err.message || "could not start");
+        btn.disabled = false;
+        return;
+    }
+
+    polling = setInterval(pollStatus, 1000);
+}
+
+async function pollStatus() {
+    const res = await fetch("/api/status");
+    const data = await res.json();
+    const statusBox = document.getElementById("status-box");
+    const btn = document.getElementById("attack-btn");
+
+    if (data.running) {
+        statusBox.className = "status running";
+        statusBox.textContent = `🔴 Attack running against ${data.target} ... ${data.elapsed_seconds ?? 0}s elapsed`;
+        if (data.live) updateLive(data.live);
+        return;
+    }
+
+    clearInterval(polling);
+    btn.disabled = false;
+
+    if (data.error) {
+        statusBox.className = "status error";
+        statusBox.textContent = "Error: " + data.error;
+        return;
+    }
+
+    if (data.result) {
+        statusBox.className = "status done";
+        statusBox.textContent = `✅ Done — ${data.result.profile} against ${data.result.target}`;
+        showResults(data.result);
+    } else {
+        statusBox.className = "status idle";
+        statusBox.textContent = "Idle — ready when you are";
+    }
+}
+
+function updateLive(live) {
+    document.getElementById("live-elapsed").textContent = live.elapsed_seconds + "s";
+    document.getElementById("live-attack-rate").textContent = live.attack_rate_per_sec + "/s";
+    document.getElementById("live-probe-total").textContent = live.probe_total;
+
+    const survivalEl = document.getElementById("live-survival");
+    if (live.probe_survival_pct !== null) {
+        survivalEl.textContent = live.probe_survival_pct + "%";
+        survivalEl.className = "value " + (live.probe_survival_pct >= 50 ? "good" : "bad");
+        survivalHistory.push({ t: live.elapsed_seconds, pct: live.probe_survival_pct });
+    } else {
+        survivalEl.textContent = "--%";
+    }
+
+    drawSurvivalChart();
+    drawCodesChart(live.attack_codes || {}, live.probe_codes || {});
+}
+
+function drawSurvivalChart() {
+    const canvas = document.getElementById("survival-chart");
+    resizeCanvas(canvas);
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // gridlines at 0/50/100%
+    ctx.strokeStyle = "#2a2f3d";
+    ctx.lineWidth = 1;
+    [0, 0.5, 1].forEach(frac => {
+        const y = h - frac * (h - 20) - 10;
+        ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(w - 10, y); ctx.stroke();
+    });
+    ctx.fillStyle = "#9aa0ac";
+    ctx.font = "10px monospace";
+    ctx.fillText("100%", 2, 14);
+    ctx.fillText("50%", 2, h / 2 + 4);
+    ctx.fillText("0%", 2, h - 6);
+
+    if (survivalHistory.length < 2) return;
+    const maxT = Math.max(...survivalHistory.map(p => p.t), 1);
+
+    ctx.strokeStyle = "#7ee2a8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    survivalHistory.forEach((p, i) => {
+        const x = 30 + (p.t / maxT) * (w - 40);
+        const y = h - (p.pct / 100) * (h - 20) - 10;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+}
+
+function drawCodesChart(attackCodes, probeCodes) {
+    const canvas = document.getElementById("codes-chart");
+    resizeCanvas(canvas);
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const colorFor = code => code === "200" ? "#7ee2a8" : (code === "503" ? "#f5a623" : "#e5484d");
+
+    function drawStackedBar(y, barH, codes, label) {
+        const total = Object.values(codes).reduce((a, b) => a + b, 0) || 1;
+        let x = 70;
+        const barW = w - 90;
+        ctx.fillStyle = "#9aa0ac";
+        ctx.font = "11px sans-serif";
+        ctx.fillText(label, 4, y + barH / 2 + 4);
+        Object.entries(codes).forEach(([code, count]) => {
+            const segW = (count / total) * barW;
+            ctx.fillStyle = colorFor(code);
+            ctx.fillRect(x, y, segW, barH);
+            x += segW;
+        });
+        ctx.strokeStyle = "#2a2f3d";
+        ctx.strokeRect(70, y, barW, barH);
+    }
+
+    drawStackedBar(10, 30, attackCodes, "Attack");
+    drawStackedBar(60, 30, probeCodes, "Probe");
+
+    // legend
+    ctx.font = "10px monospace";
+    ctx.fillStyle = "#7ee2a8"; ctx.fillRect(70, 100, 10, 10); ctx.fillStyle = "#cfd3da"; ctx.fillText("200 OK", 84, 109);
+    ctx.fillStyle = "#f5a623"; ctx.fillRect(150, 100, 10, 10); ctx.fillStyle = "#cfd3da"; ctx.fillText("503 shed", 164, 109);
+    ctx.fillStyle = "#e5484d"; ctx.fillRect(240, 100, 10, 10); ctx.fillStyle = "#cfd3da"; ctx.fillText("other/broken", 254, 109);
+}
+
+function resizeCanvas(canvas) {
+    const cssWidth = canvas.parentElement.clientWidth - 48; // account for card padding
+    if (canvas.width !== cssWidth) canvas.width = cssWidth;
+}
+
+function showResults(result) {
+    document.getElementById("results-card").classList.remove("hidden");
+    document.getElementById("survival-number").textContent = result.survival_pct + "%";
+    document.getElementById("survival-bar").style.width = result.survival_pct + "%";
+    document.getElementById("stat-probe-total").textContent = result.probe_total;
+    document.getElementById("stat-probe-success").textContent = result.probe_success;
+    document.getElementById("stat-latency").textContent =
+        result.probe_median_latency_ms !== null ? result.probe_median_latency_ms + " ms" : "n/a";
+    document.getElementById("stat-attack-error").textContent =
+        result.attack_error_pct !== null ? result.attack_error_pct + "%" : "n/a";
+}
+
+loadConfig();
+onProfileChange();
+</script>
+
+</body>
+</html>

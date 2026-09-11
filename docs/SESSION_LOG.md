@@ -38,6 +38,20 @@ Record each test run here with metadata, results, and observations. Use this to 
   **NO valid fraction=0.75 reading exists — if the report needs one, it must be
   re-run.** Config decision stands: **`LEGITIMATE_SLOT_FRACTION=1.0`**, based on
   the clean 96.7% number, not the discarded 93.4%.
+- **`feature/service` merged (this commit): `service/start.sh` had two launch bugs
+  (`--np` is not a valid flag — the correct one is `-np`/`--parallel`; no `--host` was
+  ever passed, so the server was loopback-only) and `-c`/`--ctx-size` was found to
+  divide EVENLY across `-np` slots — confirmed empirically (`--parallel 4 --ctx-size
+  2048` → `n_ctx_slot=512`), which the earlier flat `CONTEXT_SIZE=4096` fix (also
+  2026-09-09) didn't account for (at `-np=4` that's 1024/slot, not 4096). **None of
+  the Profile D or fraction-sweep results above are affected by the context-sizing
+  issue**: every recorded Profile D attack run was 100% rejected pre-forward (429 or
+  503, checked in the A→C→B pipeline — never reaches `llama-server`), and probe.js's
+  own requests are far too small to matter either way. The fix (`CONTEXT_SIZE =
+  NUM_PARALLEL × CONTEXT_SIZE_PER_SLOT`, per-slot default 2560) needs to be in place
+  before any FUTURE test admits and forwards a large-but-under-budget request, since
+  that's the scenario that would actually be exposed to truncation. See
+  `docs/MANUAL_CONFIG.md` for the full history of both bugs.
 - **What was actually run** (see Run Table below): Phase 1 (baseline) — 100%.
   Phase 2 (attack, no Shield) — 2.2%. Phase 3 (attack, Shield with the unfixed
   perf bug) — 17.3%. Phase 4 (attack, Shield with both perf fixes) — 60.0%.

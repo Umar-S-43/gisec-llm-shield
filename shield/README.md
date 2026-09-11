@@ -73,7 +73,10 @@ Shield logs a warning at startup if this is left at its default.
 
 - Reverse proxy listens on `http://localhost:9090` (configurable via `SHIELD_PORT`)
 - Reads `LLAMA_SERVER_URL` from environment (no hardcoded IPs)
-- `SHIELD_ACTIVE=false` flips it to pure pass-through logging (Day-1 behavior)
+- `SHIELD_ACTIVE=false` flips it to pure pass-through logging (Day-1 behavior) at
+  startup; `POST /admin/shield-active` flips it at runtime (used by
+  `loadgen/run_comparison.sh` so both legs of the on/off comparison hit the same
+  process instead of one leg bypassing the Shield)
 - Returns `429` (token budget exceeded) or `503` (queue/slots full) when shedding
 - One-command launch with test
 
@@ -136,6 +139,12 @@ curl -X POST http://localhost:9090/completion \
 curl -X POST http://localhost:9090/completion \
   -H "Content-Type: application/json" \
   -d "{\"prompt\": \"$(python -c 'print("word " * 2000)')\", \"n_predict\": 1024}"
+
+# Toggle defense-off/defense-on at runtime without restarting the process (this is
+# what loadgen/run_comparison.sh uses for the interleaved comparison):
+curl -X POST http://localhost:9090/admin/shield-active \
+  -H "Content-Type: application/json" -d '{"active": false}'
+curl http://localhost:9090/admin/shield-active   # read current state
 ```
 
 ## Configuration (env vars, see `.env.example`)
@@ -144,7 +153,7 @@ curl -X POST http://localhost:9090/completion \
 |---|---|---|
 | `LLAMA_SERVER_URL` | *(required)* | Where to forward admitted requests |
 | `SHIELD_PORT` | 9090 | Port the Shield listens on |
-| `SHIELD_ACTIVE` | true | `false` = pass-through logging only, no blocking |
+| `SHIELD_ACTIVE` | true | Startup value only; `false` = pass-through logging, no blocking. Flip at runtime via `POST /admin/shield-active` |
 | `LEGITIMATE_BUCKET_CAPACITY` / `LEGITIMATE_BUCKET_REFILL_RATE` | 2000 / 200 | Cost-unit budget for `X-Priority: legitimate` traffic |
 | `DEFAULT_BUCKET_CAPACITY` / `DEFAULT_BUCKET_REFILL_RATE` | 500 / 50 | Cost-unit budget for everything else |
 | `DEFERRED_SHED_THRESHOLD_DEFAULT` / `_LEGITIMATE` | 2 / 8 | `llamacpp:requests_deferred` shedding thresholds |
@@ -152,6 +161,8 @@ curl -X POST http://localhost:9090/completion \
 | `LEGITIMATE_SLOT_FRACTION` | 0.5 | Fraction of `TOTAL_LLAMA_SLOTS` reserved for legitimate-tier in-flight requests |
 | `PER_IDENTITY_CONCURRENCY_CAP` | 2 | Max in-flight requests per source IP, regardless of claimed tier — see known limitation above |
 | `SLOT_CHECK_TTL` | 0.5 | Cache TTL (seconds) for the `/slots` availability check — see `docs/MANUAL_CONFIG.md`. Performance fix, **unverified** as of introduction; tune once real rerun data exists. |
+| `UNBOUNDED_OUTPUT_COST_ESTIMATE` | 2048 | Cost units charged when `n_predict`/`max_tokens` is missing or `<=0` (llama.cpp's "unbounded" meaning) — bills the worst case instead of a cheap flat guess |
+| `FORWARD_TIMEOUT_SECONDS` | 130 | Shield's HTTP client timeout when forwarding to llama-server; must be `>=` the slowest client-side timeout any loadgen profile uses (`probe.js` at 130s is currently the tallest) |
 
 Cost units are ~tokens: prompt word-count/0.75 + `n_predict`/`max_tokens` (defaults to
 128 if unset). This is a cheap estimate on purpose — the whole point is to reject

@@ -7,11 +7,20 @@
 # so running all "off" runs first and all "on" runs second would unfairly make
 # whichever set ran second look different just because the CPU was hotter/cooler.
 #
+# Both legs target the SAME Shield process at SHIELD_URL and toggle its behavior
+# via POST /admin/shield-active — they do NOT send the "off" leg straight to
+# llama-server. Bypassing the Shield for "off" would confound the comparison with
+# an extra network hop / FastAPI overhead that has nothing to do with the defense
+# itself (see shield/main.py's /admin/shield-active docstring). This is what
+# shield/main.py's own module docstring means by "flip this instead of standing up
+# a second target" — SHIELD_ACTIVE the env var only sets the STARTUP value; this
+# script is what actually flips it between rounds without restarting the process.
+#
 # This script also always runs the legitimate probe cohort (probe.js) concurrently
 # with the attack profile and reports whether it survived.
 #
 # Usage:
-#   export $(grep -v '^#' .env | xargs)   # load LLAMA_SERVER_URL and SHIELD_URL
+#   export $(grep -v '^#' .env | xargs)   # load SHIELD_URL
 #   bash loadgen/run_comparison.sh <profile> <rounds>
 #
 #   profile: spike | sustained | profile-d
@@ -23,12 +32,13 @@ set -e
 PROFILE="${1:?Usage: run_comparison.sh <spike|sustained|profile-d> <rounds>}"
 ROUNDS="${2:-3}"
 
-if [ -z "$LLAMA_SERVER_URL" ]; then
-    echo "Error: LLAMA_SERVER_URL is not set (needed for defense-off runs)"
+SHIELD_URL="${SHIELD_URL:-http://localhost:9090}"
+
+if ! curl -sf "$SHIELD_URL/health" > /dev/null; then
+    echo "Error: Shield proxy not reachable at $SHIELD_URL/health"
+    echo "Start it first: python shield/main.py"
     exit 1
 fi
-
-SHIELD_URL="${SHIELD_URL:-http://localhost:9090}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RESULTS_DIR="results/comparison_${PROFILE}_${TIMESTAMP}"
@@ -37,8 +47,7 @@ mkdir -p "$RESULTS_DIR"
 echo "=========================================="
 echo "Interleaved on/off comparison: $PROFILE"
 echo "Rounds: $ROUNDS (each round = 1 off run + 1 on run)"
-echo "Defense-off target: $LLAMA_SERVER_URL (direct to llama-server)"
-echo "Defense-on target:  $SHIELD_URL (through Shield)"
+echo "Both legs target the Shield at: $SHIELD_URL (toggled via /admin/shield-active)"
 echo "Results dir: $RESULTS_DIR"
 echo "=========================================="
 
@@ -48,26 +57,40 @@ echo "=========================================="
 # session needs to be visible as a column in the data, not just inferred from filenames.
 RUN_ORDER=0
 
+set_shield_active() {
+    local active="$1"   # true | false
+    curl -sf -X POST "$SHIELD_URL/admin/shield-active" \
+        -H "Content-Type: application/json" \
+        -d "{\"active\": $active}" > /dev/null
+}
+
 run_leg() {
     local mode="$1"       # off | on
+
     local round="$2"
-    local target="$3"
     RUN_ORDER=$((RUN_ORDER + 1))
 
     echo ""
     echo "--- Round $round: defense-$mode (run_order=$RUN_ORDER) ---"
 
-    # Legitimate probe runs concurrently in the background for this leg.
+    if [ "$mode" = "off" ]; then
+        set_shield_active false
+    else
+        set_shield_active true
+    fi
+
+    # Legitimate probe runs concurrently in the background for this leg. Both legs
+    # target the Shield ($SHIELD_URL); only its /admin/shield-active state differs.
     # --out csv writes k6's raw per-request samples (not just the aggregate summary) —
     # normalize_csv.py reshapes that into the per-request CSV /analysis reads.
-    LLAMA_SERVER_URL="$target" PROBE_DURATION="2m" \
+    LLAMA_SERVER_URL="$SHIELD_URL" PROBE_DURATION="2m" \
         k6 run loadgen/profiles/probe.js \
         --summary-export="$RESULTS_DIR/round${round}_${mode}_probe.json" \
         --out csv="$RESULTS_DIR/round${round}_${mode}_probe_raw.csv" \
         > "$RESULTS_DIR/round${round}_${mode}_probe.log" 2>&1 &
     local probe_pid=$!
 
-    LLAMA_SERVER_URL="$target" \
+    LLAMA_SERVER_URL="$SHIELD_URL" \
         k6 run "loadgen/profiles/${PROFILE}.js" \
         --summary-export="$RESULTS_DIR/round${round}_${mode}_attack.json" \
         --out csv="$RESULTS_DIR/round${round}_${mode}_attack_raw.csv" \
@@ -88,9 +111,12 @@ run_leg() {
 }
 
 for round in $(seq 1 "$ROUNDS"); do
-    run_leg "off" "$round" "$LLAMA_SERVER_URL"
-    run_leg "on" "$round" "$SHIELD_URL"
+    run_leg "off" "$round"
+    run_leg "on" "$round"
 done
+
+# Leave the Shield in its normal defense-on state when the harness exits.
+set_shield_active true
 
 echo ""
 echo "=========================================="

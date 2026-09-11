@@ -229,6 +229,15 @@ class TokenBucket:
             return True
         return False
 
+    def refund(self, cost: float):
+        """Give back a cost previously consume()'d, for a request that later
+        turned out not to be forwarded after all (rejected by a downstream
+        check). Capped at capacity, same as a normal refill, so a refund can
+        never push the bucket above its max. Cheap and instant -- no await,
+        no I/O, just arithmetic on an in-memory number -- so calling this in
+        every downstream rejection branch costs nothing measurable."""
+        self.tokens = min(self.capacity, self.tokens + cost)
+
 
 legitimate_bucket = TokenBucket(settings.legitimate_bucket_capacity, settings.legitimate_bucket_refill_rate)
 default_bucket = TokenBucket(settings.default_bucket_capacity, settings.default_bucket_refill_rate)
@@ -395,18 +404,20 @@ async def forward_request(request: Request) -> JSONResponse:
 
     # Pipeline order: A -> C -> B (changed 2026-09-11; was B -> C -> A).
     #
-    # KNOWN, ACCEPTED TRADEOFF of this order: TokenBucket.consume() deducts
-    # tokens immediately on success, with no refund path. Under the old
-    # B -> C -> A order, a request already known to be doomed (queue too deep,
-    # tier at capacity) never reached the bucket at all, so the budget was only
-    # ever spent on requests that had a real shot at being forwarded. Under
-    # this order, a request that passes the cost check but then gets shed by C
-    # or B has already paid real budget for nothing -- under sustained load,
-    # this bucket drains faster than the previous order did, purely from
-    # requests that never actually reach llama-server. That's a real,
-    # measurable behavior change, not just a reordering of log lines -- if a
-    # future run shows the legitimate/default buckets emptying unusually fast,
-    # this is why.
+    # A's bucket.consume() below deducts immediately, not just checks -- that's
+    # deliberate, not an oversight: an async event loop can have many requests
+    # "in the middle of" this function at once, and if A only peeked at the
+    # balance without reserving it, two concurrent requests could each see
+    # enough budget for themselves while jointly overspending it (a classic
+    # time-of-check-to-time-of-use race) -- immediate deduction is what
+    # prevents that.
+    #
+    # But that alone would mean a request that passes A and is THEN shed by C
+    # or B has paid for nothing it got to use. Fixed with bucket.refund(cost)
+    # at every downstream rejection point below -- the bucket is only ever
+    # actually spent, net, on requests that make it all the way to
+    # llama-server. refund() has no await/I/O in it (see its docstring), so
+    # this costs nothing measurable.
 
     # (A) Cost-aware token budget -- checked first now, so every request's cost
     # is judged before any capacity/queue concern, matching the project's core
@@ -429,9 +440,10 @@ async def forward_request(request: Request) -> JSONResponse:
         # Legitimate traffic may use the full pool, including the share default
         # traffic is capped away from.
         if _in_flight["legitimate"] >= settings.total_llama_slots:
+            bucket.refund(cost)
             logger.warning(
                 f"Slot reservation: legitimate_in_flight={_in_flight['legitimate']} "
-                f">= total_llama_slots={settings.total_llama_slots}; shedding"
+                f">= total_llama_slots={settings.total_llama_slots}; shedding (refunded cost={cost})"
             )
             return JSONResponse(
                 {"error": "Tier capacity reserved", "reason": "legitimate_in_flight_at_total_capacity"},
@@ -441,10 +453,11 @@ async def forward_request(request: Request) -> JSONResponse:
         # Default traffic is capped to its non-reserved share and cannot eat into
         # the portion reserved for legitimate traffic, even if that portion is idle.
         if _in_flight["default"] >= _default_slot_capacity:
+            bucket.refund(cost)
             logger.warning(
                 f"Slot reservation: default_in_flight={_in_flight['default']} "
                 f">= default_capacity={_default_slot_capacity} "
-                f"(reserved_for_legitimate={_reserved_for_legitimate}); shedding"
+                f"(reserved_for_legitimate={_reserved_for_legitimate}); shedding (refunded cost={cost})"
             )
             return JSONResponse(
                 {"error": "Tier capacity reserved", "reason": "default_tier_capacity_exhausted"},
@@ -460,11 +473,13 @@ async def forward_request(request: Request) -> JSONResponse:
         else settings.deferred_shed_threshold_default
     )
     if deferred >= shed_threshold:
-        logger.warning(f"Shedding load: requests_deferred={deferred} >= threshold={shed_threshold} priority={priority}")
+        bucket.refund(cost)
+        logger.warning(f"Shedding load: requests_deferred={deferred} >= threshold={shed_threshold} priority={priority} (refunded cost={cost})")
         return JSONResponse({"error": "Service overloaded", "requests_deferred": deferred}, status_code=503)
 
     if not await slot_available():
-        logger.warning(f"No slot available on llama-server (priority={priority}); shedding")
+        bucket.refund(cost)
+        logger.warning(f"No slot available on llama-server (priority={priority}); shedding (refunded cost={cost})")
         return JSONResponse({"error": "No slots available"}, status_code=503)
 
     # Admitted — forward, tracking in-flight count for the slot-reservation check

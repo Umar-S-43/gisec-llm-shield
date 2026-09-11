@@ -1,6 +1,15 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-httpx==0.25.2
-pydantic==2.5.0
-pydantic-settings==2.1.0
-python-dotenv==1.0.0
+# Pinned for reproducibility (CLAUDE.md). Originally pinned to fastapi==0.104.1 /
+# pydantic==2.5.0-era versions, but those predate prebuilt wheels for newer CPython
+# and fail to build pydantic-core from source (needs a Rust toolchain, and even then
+# breaks on Python 3.13+'s ForwardRef signature change). Repinned 2026-09-09 to the
+# oldest versions confirmed to install from prebuilt wheels on this team's machines.
+# If your machine has Python 3.11 exactly (the documented target), the original
+# pins below in a comment also work — use whichever matches your interpreter:
+#   fastapi==0.104.1 / uvicorn==0.24.0 / httpx==0.25.2 / pydantic==2.5.0 /
+#   pydantic-settings==2.1.0 / python-dotenv==1.0.0
+fastapi==0.141.1
+uvicorn==0.52.4
+httpx==0.28.1
+pydantic==2.13.4
+pydantic-settings==2.15.0
+python-dotenv==1.2.3

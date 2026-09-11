@@ -49,7 +49,6 @@ problem). A fixed reservation with no aging is the documented fallback.
 Listens on http://localhost:9090 by default.
 """
 
-import os
 import re
 import csv
 import math
@@ -59,8 +58,8 @@ import httpx
 from pathlib import Path
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from pydantic_settings import BaseSettings
+from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Log to both the console (as before) and a real file on disk (shield/shield.log,
 # gitignored -- runtime state, not a result artifact). The console-only setup
@@ -93,6 +92,17 @@ class Settings(BaseSettings):
     legitimate_bucket_refill_rate: float = 200.0  # cost units/sec
     default_bucket_capacity: float = 500.0
     default_bucket_refill_rate: float = 50.0  # cost units/sec
+
+    # What to charge when n_predict/max_tokens is MISSING or set to llama.cpp's
+    # "unbounded" sentinel (-1, or any non-positive value). Charging a cheap flat
+    # default here (the old behavior charged 128 unconditionally) would let exactly
+    # the "long output / decode pressure" attack the project exists to catch (see
+    # CLAUDE.md, research_brief_corrected.md's arXiv:2410.10760 discussion) through
+    # the token budget for free — the request can generate until it hits the
+    # server's own context limit while being billed as if it asked for 128 tokens.
+    # Charge the worst case instead: the per-slot context budget, so an unbounded
+    # request is billed as expensively as its actual worst-case cost.
+    unbounded_output_cost_estimate: int = 2048
 
     # Queue-aware shedding thresholds (llamacpp:requests_deferred)
     deferred_shed_threshold_default: int = 2   # shed non-priority traffic first
@@ -146,15 +156,23 @@ class Settings(BaseSettings):
     # have yet as of this commit — see commit message for status.
     slot_check_ttl: float = 0.5
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        # This repo's .env is shared across Shield, loadgen, and run_comparison.sh
-        # (SHIELD_URL, SHIELD_PORT for other tools, etc.) — pydantic-settings
-        # defaults to rejecting any .env key it can't map to a declared field,
-        # which crashes the Shield on startup for keys that are legitimately
-        # meant for other components. Ignore, don't forbid, unknown keys.
-        extra = "ignore"
+    # Must be >= the slowest legitimate generation any loadgen profile allows for,
+    # or the Shield kills and reports a proxy error on a request that would have
+    # succeeded given more time — looks like a Shield bug in results, but is really
+    # just a timeout mismatch. probe.js's k6 client waits up to 130s (the tallest of
+    # any loadgen script as of 2026-09-10); matched here with 10s to spare above
+    # profile-d.js's 120s. See docs/MANUAL_CONFIG.md.
+    forward_timeout_seconds: float = 130.0
+
+    # extra="ignore": .env is a SHARED file (CLAUDE.md — "every component reads this
+    # same variable"), so it legitimately holds vars meant for other components
+    # (SHIELD_URL for loadgen, LLAMA_SERVER_HOST/MODEL_PATH/NUM_PARALLEL for
+    # service/start.sh, etc.) that aren't Settings fields here. pydantic-settings
+    # defaults to rejecting unknown vars, which crashed the Shield at startup on
+    # any .env containing them — not a hypothetical, this is the exact shape of
+    # .env.example. Modernized from the deprecated class-based Config to
+    # model_config while fixing this.
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 
 settings = Settings()
@@ -164,6 +182,11 @@ if not settings.llama_server_url:
 
 logger.info(f"Shield proxy configured to forward to: {settings.llama_server_url}")
 logger.info(f"Shield active (defense-on): {settings.shield_active}")
+
+# Mutable at runtime via POST /admin/shield-active — see that endpoint's docstring
+# for why. settings.shield_active above remains the STARTUP default only; this is
+# what forward_request() and /health actually consult from here on.
+_shield_active = settings.shield_active
 
 if "total_llama_slots" not in settings.model_fields_set:
     # NOTE: checking os.environ here would be wrong — pydantic-settings loads
@@ -189,6 +212,21 @@ logger.info(
     f"Slot reservation: total={settings.total_llama_slots}, "
     f"reserved_for_legitimate={_reserved_for_legitimate}, default_capacity={_default_slot_capacity}"
 )
+if _default_slot_capacity <= 0:
+    # Not a misconfiguration by itself (total_llama_slots=1 legitimately has nowhere
+    # else to put the reservation), but it silently means EVERY default-tier request
+    # gets a 503 at the slot-reservation check before its cost is ever estimated —
+    # the token budget below never runs for default traffic. That would make a
+    # Profile D run "look like" a token-cost win when it's actually just a blanket
+    # block. Loud warning so this doesn't get discovered after a load test.
+    logger.warning(
+        f"default_slot_capacity={_default_slot_capacity} <= 0: ALL default-tier "
+        f"(non-legitimate) requests will be rejected by slot reservation alone, "
+        f"before the token budget ever runs. This is expected only if you intend "
+        f"to test 'no capacity at all for unprivileged traffic' as its own scenario. "
+        f"To let the token-budget defense (A) actually be exercised, raise "
+        f"TOTAL_LLAMA_SLOTS or lower LEGITIMATE_SLOT_FRACTION."
+    )
 
 # In-flight counters (requests forwarded to llama-server, response not yet returned).
 # Plain dict, not a class/lock: asyncio is single-threaded/cooperative and these are
@@ -247,7 +285,26 @@ def estimate_request_cost(body: bytes) -> tuple[int, int]:
         prompt_text = " ".join(m.get("content", "") for m in payload.get("messages", []) if isinstance(m, dict))
 
     prompt_cost = estimate_tokens(prompt_text)
-    output_cost = int(payload.get("n_predict") or payload.get("max_tokens") or 128)
+
+    # n_predict/max_tokens: missing, or <=0, means "unbounded" to llama.cpp (its own
+    # -1 default means generate until context/EOS). Bill the worst case rather than
+    # a flat guess — see Settings.unbounded_output_cost_estimate for why. NOTE: the
+    # old `payload.get("n_predict") or payload.get("max_tokens") or 128` here used
+    # to be actively wrong in the dangerous direction: n_predict=-1 is truthy in
+    # Python, so it evaluated to -1 and REDUCED total_estimated_cost below the
+    # prompt-only cost — an unbounded-output request billed for less than a short
+    # one. Explicit None/<=0 checks below fix that.
+    requested_output = payload.get("n_predict")
+    if requested_output is None:
+        requested_output = payload.get("max_tokens")
+    try:
+        requested_output = int(requested_output) if requested_output is not None else None
+    except (TypeError, ValueError):
+        requested_output = None
+    if requested_output is None or requested_output <= 0:
+        output_cost = settings.unbounded_output_cost_estimate
+    else:
+        output_cost = requested_output
 
     return (prompt_cost, output_cost)
 
@@ -445,9 +502,11 @@ async def forward_request(request: Request) -> JSONResponse:
     # why this exists and its known IP-as-identity-proxy limitation.
     client_id = request.client.host if request.client else "unknown"
 
-    if not settings.shield_active:
-        # Day-1 / defense-off mode: pass everything through, just log. No cost was
-        # estimated for this request, so there is nothing to reconcile against.
+    if not _shield_active:
+        # Day-1 / defense-off mode, OR toggled off at runtime for the interleaved
+        # on/off comparison (see /admin/shield-active): pass everything through,
+        # just log. No cost was estimated for this request, so there is nothing to
+        # reconcile against.
         logger.info(f"[PASSTHROUGH] {request.method} {request.url.path} priority={priority}")
         return await _do_forward(request, body)
 
@@ -582,11 +641,11 @@ async def _do_forward(
                 content=body,
                 headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
                 # Must stay comfortably ABOVE the longest client-side timeout any loadgen
-                # script sets (profile-d.js: 120s), not equal to it — otherwise the Shield
-                # can kill a request the client was still willing to wait for, which shows
-                # up in results as "the Shield is broken" rather than what it actually is.
-                # See docs/MANUAL_CONFIG.md.
-                timeout=130.0,
+                # script sets, not equal to it — otherwise the Shield can kill a request
+                # the client was still willing to wait for, which shows up in results as
+                # "the Shield is broken" rather than what it actually is. Configurable via
+                # Settings.forward_timeout_seconds (default 130.0) — see docs/MANUAL_CONFIG.md.
+                timeout=settings.forward_timeout_seconds,
             )
             try:
                 parsed = response.json()
@@ -607,6 +666,46 @@ async def _do_forward(
         return JSONResponse({"error": "Internal proxy error"}, status_code=500)
 
 
+@app.get("/admin/shield-active")
+async def get_shield_active():
+    return {"shield_active": _shield_active}
+
+
+@app.post("/admin/shield-active")
+async def set_shield_active(request: Request):
+    """
+    Runtime toggle for the interleaved defense-off/defense-on comparison
+    (loadgen/run_comparison.sh). SHIELD_ACTIVE at startup only sets the initial
+    value — this is what actually lets both legs of the comparison hit the SAME
+    Shield process (module docstring's stated design), instead of the "off" leg
+    bypassing the Shield and hitting llama-server directly, which would confound
+    the comparison with an extra network hop / FastAPI overhead that has nothing
+    to do with the defense itself.
+
+    NOTE: this endpoint is intentionally unauthenticated, consistent with the rest
+    of the Shield (no auth anywhere — see X-Priority spoofability note in
+    shield/README.md). Fine for a trusted LAN hackathon session; do not expose this
+    port on an untrusted network.
+
+    IMPORTANT: this route must stay registered ABOVE the `@app.post("/{path:path}")`
+    catch-all below — Starlette matches routes in registration order, and the
+    catch-all would otherwise swallow POST /admin/shield-active and forward it to
+    llama-server as if it were a completion request.
+    """
+    global _shield_active
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "expected JSON body {'active': true|false}"}, status_code=400)
+
+    if "active" not in payload or not isinstance(payload["active"], bool):
+        return JSONResponse({"error": "expected JSON body {'active': true|false}"}, status_code=400)
+
+    _shield_active = payload["active"]
+    logger.info(f"Shield active flag toggled at runtime: {_shield_active}")
+    return {"shield_active": _shield_active}
+
+
 @app.post("/{path:path}")
 async def proxy(request: Request, path: str):
     return await forward_request(request)
@@ -620,16 +719,21 @@ async def _close_pooled_clients():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "shield_active": settings.shield_active}
+    return {"status": "ok", "shield_active": _shield_active}
 
 
 @app.get("/metrics")
 async def metrics():
-    """Proxy llama-server's Prometheus text metrics unchanged (llamacpp:* only)."""
+    """Proxy llama-server's Prometheus text metrics unchanged (llamacpp:* only).
+
+    Must return PlainTextResponse, not a bare string — FastAPI JSON-encodes a
+    string return value by default, which wraps the Prometheus text in quotes
+    and escapes its newlines, making it unparseable by any real scraper.
+    """
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{settings.llama_server_url}/metrics", timeout=5.0)
-            return response.text
+            return PlainTextResponse(response.text)
     except Exception as e:
         logger.error(f"Failed to fetch metrics: {e}")
         return {"error": "Metrics unavailable"}

@@ -1,4 +1,16 @@
-# LLM Inference Service Availability Defense Prototype
+<div align="center">
+
+# 🛡️ LLM Shield
+
+### Hardening LLM Inference Against Availability Attacks
+
+![OWASP](https://img.shields.io/badge/OWASP-LLM10%3A2025-critical?style=for-the-badge&color=red)
+![Hackathon](https://img.shields.io/badge/GISEC-4--Day%20Hackathon-blueviolet?style=for-the-badge)
+![CPU-Only](https://img.shields.io/badge/CPU--Only-No%20GPU-orange?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Shield-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+
+</div>
 
 A defensive prototype for hardening LLM inference services against availability and DoS stress (OWASP LLM10:2025). Built on [llama.cpp](https://github.com/ggerganov/llama.cpp) (llama-server), running CPU-only on laptops. Server and load-generator laptops connect over the same network during scheduled sessions.
 
@@ -23,7 +35,10 @@ The system is a four-stage pipeline: a load generator, a shield proxy, the infer
 
 ### Prerequisites
 
-- **Python 3.11** (exact version required for reproducibility)
+- **Python 3.10+** (any recent CPython works; `shield/requirements.txt` and
+  `analysis/requirements.txt` are pinned to versions with prebuilt wheels as of
+  2026-09-09, tested through 3.14 — if your interpreter can't install a pin,
+  bump it and re-pin rather than hunting for an exact matching Python version)
 - **k6** (separate binary, not a Python dependency) — [install from k6.io](https://k6.io/docs/getting-started/installation/)
 - **llama.cpp** binary (`llama-server`) — See [/service/README.md](/service/README.md)
 

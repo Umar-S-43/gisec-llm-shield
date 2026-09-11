@@ -1,5 +1,13 @@
-pandas==2.1.3
-numpy==1.26.2
-matplotlib==3.8.2
-scipy==1.11.4
-locust==2.17.0
+# Pinned for reproducibility (CLAUDE.md). Originally pinned to pandas==2.1.3-era
+# versions that predate prebuilt wheels for newer CPython and fail to build from
+# source (numpy/scipy/pandas all ship compiled extensions). Repinned 2026-09-09 to
+# versions confirmed to install from prebuilt wheels and functionally tested against
+# analyze.py, proportions.py, charts.py, drift_check.py, and compare_on_off.py on
+# this team's machines. If your Python is old enough for the original pins, those
+# also work — use whichever matches your interpreter:
+#   pandas==2.1.3 / numpy==1.26.2 / matplotlib==3.8.2 / scipy==1.11.4 / locust==2.17.0
+pandas==3.0.5
+numpy==2.5.3
+matplotlib==3.11.1
+scipy==1.18.1
+locust==2.46.5

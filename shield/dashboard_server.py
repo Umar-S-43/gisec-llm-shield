@@ -47,6 +47,37 @@ RESULTS_DIR = REPO_ROOT / "results"
 
 app = FastAPI(title="Shield Dashboard")
 
+
+def _child_env_forcing_fresh_dotenv() -> dict:
+    """Environment to launch the Shield subprocess with.
+
+    This dashboard process called load_dotenv() once at import time and keeps
+    running for the whole session -- but load_dotenv() writes into THIS
+    process's os.environ, and that cached copy is what every child subprocess
+    inherits by default. If .env is edited later (e.g. LEGITIMATE_SLOT_FRACTION
+    changed from 0.75 back to 0.5) while this dashboard process is still up,
+    a naive subprocess.Popen(...) hands the CHILD the dashboard's stale
+    cached value as a real environment variable -- which pydantic-settings
+    then prefers over re-reading the actual current .env file, since real env
+    vars always win over the .env file's contents. Caught live: reset the
+    Shield after editing .env 0.75 -> 0.5, and the startup log still showed
+    the old 3/1 split.
+
+    Fix: strip every key that the CURRENT .env file defines out of the
+    environment handed to the child, so the child's own Settings has nothing
+    to inherit for those keys and is forced to read them fresh off disk.
+    """
+    env = os.environ.copy()
+    env_path = REPO_ROOT / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key = line.split("=", 1)[0].strip()
+            env.pop(key, None)
+    return env
+
 # History buffer for the queue-depth-over-time chart. Populated by a
 # background poller (not by /api/state -- that only runs when a browser tab
 # is open and polling; this keeps history even if nobody's watching for a
@@ -281,6 +312,7 @@ async def control_start():
     _shield_proc = subprocess.Popen(
         [sys.executable, "shield/main.py"],
         cwd=str(REPO_ROOT),
+        env=_child_env_forcing_fresh_dotenv(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -332,6 +364,7 @@ async def control_reset():
     _shield_proc = subprocess.Popen(
         [sys.executable, "shield/main.py"],
         cwd=str(REPO_ROOT),
+        env=_child_env_forcing_fresh_dotenv(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

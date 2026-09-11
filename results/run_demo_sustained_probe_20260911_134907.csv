@@ -1,0 +1,62 @@
+timestamp,request_type,response_code,latency_ms,error_message,priority,server_url,run_order
+2026-09-11T09:49:12+00:00,completion,200,4554.418500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:15+00:00,completion,200,5904.565500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:17+00:00,completion,0,5352.344000,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:17+00:00,completion,0,3356.602300,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:17+00:00,completion,0,1349.051800,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:20+00:00,completion,503,116.558600,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:21+00:00,completion,503,129.806100,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:22+00:00,completion,503,117.092900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:25+00:00,completion,503,101.944000,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:27+00:00,completion,503,118.821800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:29+00:00,completion,200,5310.318700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:31+00:00,completion,503,112.105700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:34+00:00,completion,503,113.993200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:35+00:00,completion,200,5524.474200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:37+00:00,completion,503,113.792800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:39+00:00,completion,503,101.523300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:41+00:00,completion,200,5561.953200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:43+00:00,completion,503,107.760500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:47+00:00,completion,200,5681.321500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:50+00:00,completion,503,147.375300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:51+00:00,completion,200,5690.111400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:53+00:00,completion,200,5269.231700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:55+00:00,completion,503,106.454000,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:57+00:00,completion,200,5722.480100,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:59+00:00,completion,200,5488.301800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:49:59+00:00,completion,0,1941.981500,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:03+00:00,completion,503,106.314900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:06+00:00,completion,503,160.271800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:08+00:00,completion,503,151.926300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:08+00:00,completion,200,5699.308000,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:10+00:00,completion,503,147.664800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:12+00:00,completion,503,122.460900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:14+00:00,completion,503,119.926600,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:14+00:00,completion,200,11366.063800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:18+00:00,completion,503,128.466500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:19+00:00,completion,503,104.299900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:21+00:00,completion,200,5394.118100,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:24+00:00,completion,503,128.958200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:26+00:00,completion,503,128.186300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:27+00:00,completion,200,5644.370800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:29+00:00,completion,503,110.578400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:32+00:00,completion,503,152.725800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:33+00:00,completion,200,5714.328300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:38+00:00,completion,503,119.382200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:40+00:00,completion,200,6192.641700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:41+00:00,completion,200,5893.216400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:45+00:00,completion,200,5991.287300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:47+00:00,completion,200,5914.913400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:49+00:00,completion,200,5644.538800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:51+00:00,completion,200,5356.165800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:53+00:00,completion,200,5394.051500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:55+00:00,completion,200,5840.749100,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:57+00:00,completion,200,5985.207600,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:50:59+00:00,completion,200,5654.048400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:51:01+00:00,completion,200,5769.794400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:51:03+00:00,completion,200,5729.064900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:51:05+00:00,completion,200,5718.331400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:51:06+00:00,completion,0,4538.056400,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:51:06+00:00,completion,0,541.243700,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:51:06+00:00,completion,0,2540.899600,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T09:51:28+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1

@@ -1,0 +1,16 @@
+timestamp,request_type,response_code,latency_ms,error_message,priority,server_url,run_order
+2026-09-11T11:06:41+00:00,completion,200,4757.818200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:06:45+00:00,completion,200,6362.658900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:06:48+00:00,completion,503,95.742200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:06:49+00:00,completion,200,9160.960800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:06:52+00:00,completion,503,88.596900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:06:54+00:00,completion,200,11587.355700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:06:56+00:00,completion,200,11926.516800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:06:58+00:00,completion,200,11931.984900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:07:00+00:00,completion,200,9786.971500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:07:02+00:00,completion,200,7990.065500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:07:04+00:00,completion,200,7763.021100,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:07:05+00:00,completion,200,7119.650100,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:07:07+00:00,completion,200,6880.275400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:07:09+00:00,completion,200,7038.439400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T11:07:11+00:00,completion,200,7230.253800,,legitimate,http://10.185.191.136:9090/completion,1

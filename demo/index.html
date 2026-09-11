@@ -133,6 +133,24 @@
                oninput="document.getElementById('rate-value').textContent = this.value">
     </div>
 
+    <div style="margin-bottom: 18px;">
+        <label style="font-size: 12px; color: #9aa0ac; display:block; margin-bottom: 6px;">
+            Duration: <span id="duration-value">2</span> min
+        </label>
+        <input type="range" id="duration-slider" min="1" max="15" value="2" step="1" style="width:100%"
+               oninput="document.getElementById('duration-value').textContent = this.value; updateAttackButtonLabel();">
+    </div>
+
+    <label style="display:flex; align-items:flex-start; gap:8px; margin-bottom: 18px; font-size: 13px; color: #ffb4b6; background: #2a1517; border: 1px solid #4a2226; border-radius: 8px; padding: 10px;">
+        <input type="checkbox" id="spoof-checkbox" style="margin-top: 2px;">
+        <span>
+            🎭 <strong>Attacker spoofs <code>X-Priority: legitimate</code></strong> — simulates an
+            attacker with a stolen, purchased, or otherwise verified-looking credential.
+            The Shield trusts this header with no authentication behind it; this tests
+            whether that's exploitable.
+        </span>
+    </label>
+
     <button class="attack" id="attack-btn" onclick="startAttack()">🚨 LAUNCH ATTACK (~2 min)</button>
 
     <div class="status idle" id="status-box">Idle — ready when you are</div>
@@ -189,11 +207,18 @@ function onProfileChange() {
     document.getElementById("rate-row").style.display = profile === "sustained" ? "block" : "none";
 }
 
+function updateAttackButtonLabel() {
+    const mins = document.getElementById("duration-slider").value;
+    document.getElementById("attack-btn").textContent = `🚨 LAUNCH ATTACK (~${mins} min)`;
+}
+
 async function startAttack() {
     const btn = document.getElementById("attack-btn");
     const statusBox = document.getElementById("status-box");
     const profile = document.getElementById("profile-select").value;
     const rate = profile === "sustained" ? parseInt(document.getElementById("rate-slider").value, 10) : null;
+    const durationMinutes = parseInt(document.getElementById("duration-slider").value, 10);
+    const spoofLegitimate = document.getElementById("spoof-checkbox").checked;
 
     btn.disabled = true;
     survivalHistory = [];
@@ -205,7 +230,7 @@ async function startAttack() {
     const res = await fetch("/api/start-attack", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: currentMode, profile: profile, rate: rate }),
+        body: JSON.stringify({ mode: currentMode, profile: profile, rate: rate, spoof_legitimate: spoofLegitimate, duration_minutes: durationMinutes }),
     });
 
     if (res.status !== 200) {
@@ -358,6 +383,7 @@ function showResults(result) {
 
 loadConfig();
 onProfileChange();
+updateAttackButtonLabel();
 </script>
 
 </body>

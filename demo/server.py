@@ -157,7 +157,19 @@ class CsvTailer:
         return sum(1 for r in self.rows if r.get("status") == "200")
 
 
-def run_attack(target_url: str, profile_key: str, rate: int = None):
+def build_label(profile_key: str, rate: int = None, spoof_legitimate: bool = False, duration_minutes: float = 2.0) -> str:
+    label = PROFILES[profile_key]["label"]
+    if rate and profile_key == "sustained":
+        label = f"Sustained Flood ({rate} req/s)"
+    if duration_minutes and duration_minutes != 2.0:
+        dur_str = f"{duration_minutes:g}min"
+        label += f" [{dur_str}]"
+    if spoof_legitimate:
+        label += " [SPOOFED AS LEGITIMATE]"
+    return label
+
+
+def run_attack(target_url: str, profile_key: str, rate: int = None, spoof_legitimate: bool = False, duration_minutes: float = 2.0):
     """
     Runs in a background thread. Launches attack + probe concurrently against
     target_url, polls both raw CSVs every POLL_INTERVAL_S while they run to
@@ -174,8 +186,19 @@ def run_attack(target_url: str, profile_key: str, rate: int = None):
         raw_attack = RESULTS_DIR / f"raw_demo_{profile_key}_attack_{timestamp}.csv"
         raw_probe = RESULTS_DIR / f"raw_demo_{profile_key}_probe_{timestamp}.csv"
 
-        probe_env = {**os.environ, "LLAMA_SERVER_URL": target_url, "PROBE_DURATION": "2m"}
-        attack_env = {**os.environ, "LLAMA_SERVER_URL": target_url}
+        # Seconds, not a 'Xm' string -- avoids ambiguity if duration_minutes is
+        # fractional, and both probe.js and the attack scripts accept k6 duration
+        # strings like '300s' equally well as '5m'. Probe runs the SAME duration
+        # as the attack so they stay concurrent for the whole test, not just the
+        # first 2 minutes of a longer run.
+        duration_str = f"{int(duration_minutes * 60)}s"
+        probe_env = {**os.environ, "LLAMA_SERVER_URL": target_url, "PROBE_DURATION": duration_str}
+        attack_env = {**os.environ, "LLAMA_SERVER_URL": target_url, "ATTACK_DURATION": duration_str}
+        if spoof_legitimate:
+            # Security test: attacker claims X-Priority: legitimate (see sustained.js
+            # / profile-d.js comments — is_priority_request() in shield/main.py is an
+            # unauthenticated header check with no verification behind it).
+            attack_env["ATTACK_SPOOF_LEGITIMATE"] = "1"
         if rate and profile_key == "sustained":
             # sustained.js reads SUSTAINED_RATE (env-overridable, added so rate
             # sweeps don't require editing the script each time).
@@ -249,7 +272,7 @@ def run_attack(target_url: str, profile_key: str, rate: int = None):
 
         result = {
             "target": target_url,
-            "profile": f"Sustained Flood ({rate} req/s)" if (rate and profile_key == "sustained") else profile["label"],
+            "profile": build_label(profile_key, rate, spoof_legitimate, duration_minutes),
             "probe_total": total_probe,
             "probe_success": success_probe,
             "survival_pct": survival_pct,
@@ -327,6 +350,8 @@ class Handler(BaseHTTPRequestHandler):
             mode = body.get("mode", "shield")  # "shield" or "direct"
             profile_key = body.get("profile", "sustained")
             rate = body.get("rate")  # requests/sec override, sustained.js only; None = script default (50)
+            spoof_legitimate = bool(body.get("spoof_legitimate", False))
+            duration_minutes = body.get("duration_minutes", 2.0)
 
             with STATE_LOCK:
                 if STATE["running"]:
@@ -352,10 +377,15 @@ class Handler(BaseHTTPRequestHandler):
                     except (TypeError, ValueError):
                         self._send_json({"status": "error", "message": "rate must be an integer between 1 and 1000"}, status=400)
                         return
+                try:
+                    duration_minutes = float(duration_minutes)
+                    if duration_minutes <= 0 or duration_minutes > 60:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    self._send_json({"status": "error", "message": "duration_minutes must be a number between 0 and 60"}, status=400)
+                    return
 
-                label = PROFILES[profile_key]["label"]
-                if rate is not None and profile_key == "sustained":
-                    label = f"Sustained Flood ({rate} req/s)"
+                label = build_label(profile_key, rate, spoof_legitimate, duration_minutes)
 
                 STATE["running"] = True
                 STATE["target"] = target_url
@@ -365,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["result"] = None
                 STATE["error"] = None
 
-            thread = threading.Thread(target=run_attack, args=(target_url, profile_key, rate), daemon=True)
+            thread = threading.Thread(target=run_attack, args=(target_url, profile_key, rate, spoof_legitimate, duration_minutes), daemon=True)
             thread.start()
             self._send_json({"status": "started", "target": target_url, "profile": label})
         else:

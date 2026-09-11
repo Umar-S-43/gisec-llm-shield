@@ -15,35 +15,48 @@ Record each test run here with metadata, results, and observations. Use this to 
 - **RESOLVED 2026-09-10: both Shield perf fixes CONFIRMED live.** Phase 4 (50
   req/s flood, identical to Phase 3) after both fixes: legitimate survival
   **17.3% → 60.0%**, `response_code=0` count **32 → 0**. Closed, not re-opened.
-- **RESOLVED 2026-09-11: `LEGITIMATE_SLOT_FRACTION` was undersized — this IS the
-  dominant fix, confirmed after catching and correcting a confound.** Initial
-  test found survival at only 50.8% (3 req/s, fraction=0.5, the default) —
-  diagnosed as undersized slot reservation (Little's Law: the probe alone needs
-  ~3 concurrent slots, only 2 were reserved), NOT a differentiation failure
-  (attack was still ~98% rejected throughout). An UNRELATED architecture change
-  landed on `main` mid-investigation (pipeline reordered A→C→B + a token-refund
-  fix, `78d67ee`/`5bf923f`), which briefly looked like it might be the bigger
-  driver — re-testing the SAME fraction (0.75) on both the old and new pipeline
-  isolated its real effect at only **+2.0 points (75.0% → 77.0%), likely within
-  noise, NOT dominant.** The fraction itself remains the clearly dominant driver:
-  **50.8% (0.5) → 75-77% (0.75) → 93.4% (1.0)**. Config decision:
-  **`LEGITIMATE_SLOT_FRACTION=1.0` is the recommended final value** — see the
-  dated entry below for full
-  reasoning and the intermediate (confounded) numbers, kept for transparency
-  rather than deleted.
+- **SUPERSEDED, then RE-RESOLVED 2026-09-11: a THIRD caching bug invalidated the
+  first fraction sweep below; clean data exists only after it was fixed.**
+  Sequence: (1) diagnosed `LEGITIMATE_SLOT_FRACTION=0.5` as undersized via
+  Little's Law (probe needs ~3 concurrent slots, only 2 reserved) — a capacity
+  issue, NOT a differentiation failure, since attack was still ~98% rejected
+  throughout; (2) swept 0.5→0.75→1.0 (50.8%→75.0%→93.4%), then caught an
+  architecture-reorder confound (`78d67ee`/`5bf923f` landing mid-sweep) and
+  "corrected" for it, concluding the reorder contributed only +2.0 points; (3)
+  THEN discovered the dashboard (`shield/dashboard_server.py`) had NEVER
+  actually been restarted between any of those fraction changes — confirmed by
+  the team's own fix `57a56a2` "Fix dashboard control endpoints inheriting a
+  stale cached .env value" (it caches `.env` at import and hands the stale copy
+  to every "restart"). **This means the 0.75 and 1.0 readings above (75.0%,
+  77.0%, 93.4%) cannot be trusted and must NOT be cited in the report.** The
+  0.75 "confound correction" built on top of them is therefore also invalid.
+  (4) Re-tested with the dashboard properly killed and relaunched each time:
+  **fraction=0.5 confirmed clean across FOUR rates (3/10/50/150 req/s): 54.1%,
+  50.8%, 58.3%, 50.8% — a tight, rate-independent band.** **fraction=1.0
+  confirmed clean at 3 req/s: 96.7% (59/61), attack 100% blocked.** These two
+  are the only trustworthy fraction data points from today.
+  **NO valid fraction=0.75 reading exists — if the report needs one, it must be
+  re-run.** Config decision stands: **`LEGITIMATE_SLOT_FRACTION=1.0`**, based on
+  the clean 96.7% number, not the discarded 93.4%.
 - **What was actually run** (see Run Table below): Phase 1 (baseline) — 100%.
   Phase 2 (attack, no Shield) — 2.2%. Phase 3 (attack, Shield with the unfixed
   perf bug) — 17.3%. Phase 4 (attack, Shield with both perf fixes) — 60.0%.
-  2026-09-11 (all at 3 req/s): fraction=0.5/old pipeline — 50.8%;
-  fraction=0.75/old pipeline — 75.0%; fraction=0.75/NEW pipeline — **77.0%
-  (isolates the architecture fix at +2.0 pts, not dominant)**; fraction=1.0/NEW
-  pipeline — **93.4% (recommended final config)**.
-- **Next actions, in priority order:** (1) test `profile-d.js` (slow/high-cost —
-  the project's key differentiator profile, tests token-cost admission control
-  specifically), STILL never run live as of this entry, (2) get Syeda to push
-  her real `service/start.sh` config for the record, (3) write the final report
-  incorporating the perf-fix story, the pipeline-reorder story, AND the
-  decomposed slot-fraction finding — three distinct, real findings, not one.
+  2026-09-11, confirmed clean only: fraction=0.5 at 3/10/50/150 req/s — 54.1%/
+  50.8%/58.3%/50.8%. fraction=1.0 at 3 req/s — **96.7% (recommended final)**.
+  Profile D (cost-based attack) at fraction=0.5 — attack 100% rejected as 429
+  token-budget (not 503), probe **98.4% survival**. Spoofed-as-legitimate attack
+  (X-Priority header has zero authentication) collapsed survival to single
+  digits until a new per-identity concurrency cap (`cf8bf91`) was added; tested
+  with a genuinely separate second laptop, survival recovered to **49.2%**
+  (sustained flood) and **35-49%** (Profile D, 2min/5min) against a
+  fully-spoofing attacker. Full detail in the dated entries below.
+- **Next actions, in priority order:** (1) get Syeda to push her real
+  `service/start.sh` config for the record — still not done, (2) if the final
+  report wants a `LEGITIMATE_SLOT_FRACTION=0.75` number, it must be freshly
+  re-run (no valid reading exists), (3) write the final report — see
+  `docs/SESSION_LOG.md`'s dated entries in order for the complete, honest
+  narrative including the two invalidated/corrected findings above; do not
+  present the fraction-sweep story as cleaner than it actually was.
 - **Operational note:** during today's session, the load-generator laptop
   silently fell off the hotspot and onto campus WiFi mid-session, producing a
   test result where 100% of ALL traffic (attack AND probe) showed
@@ -55,6 +68,171 @@ Record each test run here with metadata, results, and observations. Use this to 
 - **Full detail:** `docs/MANUAL_CONFIG.md` has the dated, itemized history of every
   config value that had to be fixed this way (context size, Shield timeout, `-np`
   sync) — read it before touching any threshold or flag.
+
+## 2026-09-11 update — third caching bug, clean re-verification, Profile D, spoofing vulnerability, per-identity cap, two-laptop test, duration control
+
+This entry covers everything after the fraction-sweep confusion documented below it
+(kept, not deleted, for the full honest record) up through the last test of the day.
+
+### Third caching bug: dashboard never restarted between fraction changes
+
+After writing up the fraction sweep below (0.5→50.8%, 0.75→75.0%/77.0%, 1.0→93.4%)
+and "correcting" it for the pipeline-reorder confound, asked directly whether the
+Shield's dashboard (`shield/dashboard_server.py`) had been fully killed and relaunched
+between each fraction change, or just clicked "restart" within it. Answer: **never
+restarted, only reset via its own button.** At almost the same time, `57a56a2` "Fix
+dashboard control endpoints inheriting a stale cached .env value" landed on `main`:
+the dashboard calls `load_dotenv()` once at import and stays running for the session;
+`subprocess.Popen()` hands that cached `os.environ` to every child by default, and
+`pydantic-settings` prefers real env vars over `.env` file contents — so every
+"restart" after the first was silently reusing whatever fraction was cached at
+dashboard startup, not the value actually written to `.env` moments before. The
+commit's own account: "edited .env back to 0.5, reset via the dashboard, log still
+showed the old 3/1 split."
+
+**Consequence stated plainly: the 0.75 and 1.0 readings from the sweep below (75.0%,
+77.0%, 93.4%) cannot be trusted, and neither can the "+2.0 points, not dominant"
+architecture-effect conclusion built on top of the 75.0%/77.0% pair — that comparison
+itself may have been comparing two runs at some other stale fraction, not genuinely
+0.75 both times.** Not deleting those numbers from this log, but flagging them here
+as invalid for the report.
+
+### Clean re-verification, dashboard properly killed and relaunched each time
+
+Fraction=0.5, `sustained.js`, through the Shield, four different rates:
+```
+3 req/s:   54.1% (33/61)
+10 req/s:  50.8% (31/61)   [one earlier attempt at this rate, 28.1% (16/57), discarded/unexplained — possibly interrupted, not diagnosed]
+50 req/s:  58.3% (35/60)
+150 req/s: 50.8% (31/61)   [also: 113/18001 (0.6%) attack requests got response_code=0 at this rate — minor strain signal, didn't touch the probe]
+```
+Tight 50-58% band across a 50x range in attack rate — real finding: survival at a
+fixed fraction is rate-independent once above the server's real capacity, not a
+floor that keeps eroding as the attacker pushes harder.
+
+Fraction=1.0, `sustained.js`, 3 req/s, same properly-restarted dashboard:
+**96.7% survival (59/61), attack traffic 100% blocked (0/360 got through).** This is
+the number to cite for fraction=1.0 — not the earlier, invalidated 93.4%.
+
+**No valid fraction=0.75 reading exists as of this entry.**
+
+### Profile D baseline (cost-based admission control, proven live for the first time)
+
+Fraction=0.5, `profile-d.js` (3 req/s, ~1600 prompt tokens + 512 output tokens/request),
+through the Shield:
+```
+Attack: 360/360 rejected — ALL as HTTP 429 "Token budget exceeded" (zero 503s)
+Probe:  60/61 succeeded = 98.4% survival
+```
+This is the cleanest live evidence in the project for its central thesis: the attack
+was caught on ESTIMATED COST, not rate or queue pressure — a request-counting limiter
+would see "3 req/s" and do nothing. Survival here is higher than any sustained-flood
+result at the same fraction (50-58%) because the attack never passed the token-budget
+check, so it never occupied a real slot at all.
+
+### Spoofing vulnerability: X-Priority is an unauthenticated header
+
+Read `shield/main.py`'s `is_priority_request()`:
+```python
+def is_priority_request(request: Request) -> bool:
+    return request.headers.get("X-Priority", "").lower() == "legitimate"
+```
+No authentication at all — matches "client-supplied identity spoofing," a named
+failure mode in the project's own cited research (VTC-style fairness).
+
+**Implemented `ATTACK_SPOOF_LEGITIMATE`** (env var, shared name across `sustained.js`
+and `profile-d.js`) — when set, the attack script sends `X-Priority: legitimate` on
+its own traffic. Added a checkbox to `demo/index.html`, wired through
+`demo/server.py`.
+
+**First measurement — Profile D, spoofed, fraction=0.5:**
+```
+Attack: 359/360, 100% rejected (82×429, 276×503, 1×0)
+Probe:  61 total, only 6 succeeded = 9.8% survival (down from 98.4% unspoofed)
+Probe median latency: 43,477ms (was ~7,000ms)
+```
+Every attack request still failed, but merely COMPETING for the legitimate tier
+(shared token bucket; any admitted huge Profile-D request occupies a real slot for a
+long time) was enough to crush the real user. At fraction=1.0 (pre-caching-bug-fix,
+so treat the exact number as unreliable per above): further collapse to ~3%.
+
+### Per-identity concurrency cap (team's fix, found independently on their end too)
+
+New commit `cf8bf91` "Add per-identity concurrency cap: defense when tiering is
+defeated". Their own account: with `LEGITIMATE_SLOT_FRACTION=1.0` (simulating an
+attacker with many accounts all legitimately carrying the header), the tier check
+provided ZERO protection — every rejection was raw concurrency exhaustion
+(`legitimate_in_flight >= 4`), not the tier check, since there was no "default" tier
+left to separate anyone from. Their measured collapse: 1.4% success rate.
+
+**Fix:** new `per_identity_concurrency_cap` setting (default 2) — caps in-flight
+requests per SOURCE IP, trusting no claimed tier at all. Refund-safe (reuses
+`bucket.refund(cost)`). Explicit, undeleted, documented limitation: source IP is a
+practical identity proxy, not real per-account authentication — reasonable against a
+single-machine attacker (what this project's load tests simulate), not a fully-solved
+answer to a distributed attacker with many real IPs.
+
+### Two-laptop test: does the identity cap actually protect a REAL, separate user?
+
+Testing this from one laptop is invalid — the attack and probe would share this
+laptop's IP, and the per-identity cap can't tell them apart, defeating the test.
+Set up a second laptop running `probe.js` directly (not through the demo panel):
+```
+LLAMA_SERVER_URL=http://10.185.191.136:9090 PROBE_DURATION=2m k6 run --out csv=results/second_laptop_probe.csv loadgen/profiles/probe.js
+```
+
+**Sustained flood, spoofed, fraction=1.0:**
+```
+Same-IP probe (this laptop, confounded):  1.6% (1/61)
+Different-IP probe (second laptop, real): 49.2%
+```
+**Profile D, spoofed, 2-minute run:**
+```
+Same-IP probe:  3.3% (2/61)
+Different-IP:   35%
+```
+~30x difference between same-IP and different-IP in the sustained-flood case — real
+confirmation the identity cap works when identities are genuinely separate, and the
+same-IP numbers aren't a defense failure, they're the documented IP-as-identity-proxy
+limitation showing up exactly as predicted.
+
+Secondary finding: Profile D's different-IP survival (35%) is lower than sustained
+flood's (49.2%) under the identical defense — a COUNT-based cap (2 concurrent) doesn't
+fully neutralize a COST-based attack, since one admitted huge request occupies a slot
+for a long time even at a cap of 2. This reinforces rather than contradicts the
+project's thesis (price the request, not just cap its count) — the identity cap and
+the token budget are complementary, neither alone is complete.
+
+### Duration control added; final 5-minute confirming test
+
+Added `ATTACK_DURATION` (shared env var, both attack scripts; was hardcoded `'2m'`),
+wired through `demo/server.py` so probe and attack share the same duration for the
+whole run, and a 1-15 minute slider in `demo/index.html`.
+
+**Final test — Profile D, 5 minutes, spoofed as legitimate, two laptops:**
+```
+Attack: 898 total over 5 min (~3/s — confirms duration control works correctly)
+Same-IP probe (this laptop):        150 total, 3 succeeded = 2.0% survival, median 6509ms
+Different-IP probe (second laptop): 49% survival
+```
+Same pattern as the 2-minute version (3.3%/35%), now with a much larger sample (150 vs
+61 probe requests) — a more statistically reliable confirmation, not a new finding.
+The different-IP number moved from 35% to 49% between durations; with only two data
+points this could be genuine variance or a real duration-dependent effect — not
+enough data to say which, not asserting a cause.
+
+### Explicit open gaps from today, stated plainly
+
+- No valid `LEGITIMATE_SLOT_FRACTION=0.75` reading exists post-caching-fix. Must be
+  re-run if the report needs one.
+- The Profile D two-laptop test's exact fraction value at the moment of each run was
+  not independently re-confirmed the way the sustained-flood one was — worth
+  double-checking before citing in the report.
+- `service/start.sh` still doesn't have the `--host 0.0.0.0` / `-np` (not `--np`) fixes
+  committed — worked around manually on the host machine each session, never landed
+  in the script itself.
+- The one discarded 10 req/s reading (28.1%, n=57) was never diagnosed, only assumed
+  to be an interrupted run.
 
 ## 2026-09-11 update — LEGITIMATE_SLOT_FRACTION was undersized: diagnosis, sweep, fix
 

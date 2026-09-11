@@ -1,0 +1,58 @@
+timestamp,request_type,response_code,latency_ms,error_message,priority,server_url,run_order
+2026-09-11T10:41:36+00:00,completion,503,121.302500,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:38+00:00,completion,503,151.699100,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:40+00:00,completion,200,7623.970300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:41+00:00,completion,200,7387.589700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:44+00:00,completion,503,282.590200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:46+00:00,completion,503,303.065300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:47+00:00,completion,200,6838.635900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:48+00:00,completion,200,6628.135600,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:52+00:00,completion,503,125.817800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:54+00:00,completion,503,115.658400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:54+00:00,completion,200,6427.966800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:41:56+00:00,completion,200,6568.229700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:00+00:00,completion,503,133.385900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:02+00:00,completion,503,190.146000,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:03+00:00,completion,200,6909.746300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:05+00:00,completion,200,7080.495900,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:08+00:00,completion,503,119.828600,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:10+00:00,completion,503,197.739400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:11+00:00,completion,200,7095.256000,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:13+00:00,completion,200,7287.804100,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:16+00:00,completion,503,192.366200,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:18+00:00,completion,503,164.038700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:19+00:00,completion,200,7061.465000,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:21+00:00,completion,200,7007.631600,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:24+00:00,completion,503,101.137400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:26+00:00,completion,503,129.457000,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:28+00:00,completion,200,7631.189700,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:29+00:00,completion,200,7125.596400,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:32+00:00,completion,503,169.487800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:34+00:00,completion,503,140.636000,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:34+00:00,completion,200,6628.064800,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:36+00:00,completion,200,6398.778300,,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:46+00:00,completion,0,1888.550800,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:46+00:00,completion,0,5883.073300,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:46+00:00,completion,0,9880.284100,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:46+00:00,completion,0,7877.473700,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:42:46+00:00,completion,0,3879.106400,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:11+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:13+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:15+00:00,completion,0,3499.954000,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:15+00:00,completion,0,5541.317700,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:15+00:00,completion,0,25668.606100,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:15+00:00,completion,0,28670.919000,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:15+00:00,completion,0,5543.326600,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:15+00:00,completion,0,2551.011800,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:15+00:00,completion,0,2686.167100,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:15+00:00,completion,0,688.421700,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:16+00:00,completion,0,34.483500,read: connection reset by peer,legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:37+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:39+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:41+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:43+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:45+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:47+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:49+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:51+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1
+2026-09-11T10:43:53+00:00,completion,0,0.000000,"dial: unknown errno 10060 error with msg `A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.`",legitimate,http://10.185.191.136:9090/completion,1

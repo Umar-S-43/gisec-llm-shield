@@ -1,0 +1,9 @@
+timestamp,request_type,response_code,latency_ms,error_message,priority,server_url,run_order
+2026-09-11T06:29:20+00:00,completion,200,6694.056300,,legitimate,http://10.185.191.119:8080/completion,1
+2026-09-11T06:31:25+00:00,completion,0,129993.200900,request timeout,legitimate,http://10.185.191.119:8080/completion,1
+2026-09-11T06:31:27+00:00,completion,0,129990.397300,request timeout,legitimate,http://10.185.191.119:8080/completion,1
+2026-09-11T06:31:29+00:00,completion,0,129986.168300,request timeout,legitimate,http://10.185.191.119:8080/completion,1
+2026-09-11T06:31:31+00:00,completion,0,129992.933500,request timeout,legitimate,http://10.185.191.119:8080/completion,1
+2026-09-11T06:31:33+00:00,completion,0,129988.701800,request timeout,legitimate,http://10.185.191.119:8080/completion,1
+2026-09-11T06:31:35+00:00,completion,0,129987.146100,request timeout,legitimate,http://10.185.191.119:8080/completion,1
+2026-09-11T06:31:39+00:00,completion,0,129992.342100,request timeout,legitimate,http://10.185.191.119:8080/completion,1

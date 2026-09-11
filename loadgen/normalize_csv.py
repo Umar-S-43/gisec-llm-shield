@@ -29,6 +29,14 @@ session's chronological sequence (round 1, round 2, ...), passed in via --run-or
 CLAUDE.md calls for this because laptops thermal-throttle under sustained load, so
 drift across runs needs to be visible in the data, not just inferred from filenames.
 
+`dropped_iterations` (CLAUDE.md non-negotiable: report this next to every latency
+number) was previously silently lost — the raw --out csv file has it as its own
+metric_name, but the old version of this script only ever kept http_req_duration
+rows and threw every other metric away. It's a Counter metric, so k6 writes one
+sample row per increment (each dropped iteration = its own row, value 1) rather
+than a single running total; this script now sums those rows and prints/writes
+the total instead of assuming a single pre-aggregated row exists.
+
 Usage:
     python loadgen/normalize_csv.py results/raw_baseline_20260908.csv \\
         results/run_20260908_baseline.csv --run-order 1
@@ -36,6 +44,7 @@ Usage:
 
 import argparse
 import csv
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,6 +77,7 @@ def normalize(raw_csv_path, out_csv_path, run_order):
         sys.exit(1)
 
     rows_written = 0
+    dropped_iterations = 0
     with open(raw_csv_path, newline="") as raw_f, open(out_csv_path, "w", newline="") as out_f:
         reader = csv.DictReader(raw_f)
         writer = csv.writer(out_f)
@@ -85,9 +95,21 @@ def normalize(raw_csv_path, out_csv_path, run_order):
         )
 
         for row in reader:
+            metric_name = row.get("metric_name")
+
+            # Counter metric: k6 writes one sample row per increment (each dropped
+            # iteration is its own row with metric_value=1), not one cumulative
+            # total row — sum across the whole run rather than taking the last value.
+            if metric_name == "dropped_iterations":
+                try:
+                    dropped_iterations += float(row.get("metric_value", 0) or 0)
+                except ValueError:
+                    pass
+                continue
+
             # http_req_duration fires exactly once per completed HTTP request, which
             # is what makes it the right row to key one-CSV-row-per-request off of.
-            if row.get("metric_name") != "http_req_duration":
+            if metric_name != "http_req_duration":
                 continue
 
             tags = parse_extra_tags(row.get("extra_tags", ""))
@@ -110,7 +132,27 @@ def normalize(raw_csv_path, out_csv_path, run_order):
             )
             rows_written += 1
 
+    dropped_iterations = int(dropped_iterations)
+    summary_path = Path(out_csv_path).with_name(Path(out_csv_path).stem + "_summary.json")
+    with open(summary_path, "w") as summary_f:
+        json.dump(
+            {
+                "source_raw_csv": str(raw_csv_path),
+                "run_order": run_order,
+                "requests_completed": rows_written,
+                "dropped_iterations": dropped_iterations,
+            },
+            summary_f,
+            indent=2,
+        )
+
     print(f"Wrote {rows_written} per-request rows to {out_csv_path} (run_order={run_order})")
+    print(f"dropped_iterations: {dropped_iterations} (see {summary_path})")
+    if dropped_iterations > 0:
+        print(
+            f"  NOTE: {dropped_iterations} iteration(s) never got sent at all (k6 had no "
+            "free VU) — CLAUDE.md requires reporting this next to every latency number."
+        )
     if rows_written == 0:
         print(
             "Warning: 0 rows written. Did the k6 run use --out csv=<raw file>, "

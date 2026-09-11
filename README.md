@@ -123,24 +123,6 @@ Each team member creates a feature branch for their workstream:
 
 **Branch strategy:** Keep PRs small, merge same-day to main. Do not let branches diverge more than a day (4-day timeline is tight).
 
-## Building the Repo on GitHub
-
-1. Create a new GitHub repository
-2. Push this scaffold:
-   ```bash
-   git remote add origin https://github.com/your-org/repo.git
-   git branch -M main
-   git push -u origin main
-   ```
-3. **Enable branch protection on `main`:**
-   - Require status checks: **disabled** (no CI/CD)
-   - Require approvals: **0 reviewers** (self-merge allowed)
-   - Allow force pushes: **no** (use normal push + merge)
-   - Dismiss stale reviews: **no**
-   - Require code owner review: **no**
-
-   Rationale: This team assembles on different laptops during short scheduled sessions. Waiting for external reviews is not viable; 0 reviewers lets each contributor self-merge to `main` after exit criteria are met.
-
 ## Troubleshooting
 
 - **"Connection refused" when reaching LLAMA_SERVER_URL:** Check that the server machine's IP matches what's in `.env`, that the port is open, and that `llama-server` is running.
@@ -149,6 +131,5 @@ Each team member creates a feature branch for their workstream:
 
 ---
 
-**Last updated:** 2026-09-08  
 **Hackathon:** GISEC (4 days)  
 **Defense focus:** Availability & DoS mitigation (OWASP LLM10:2025)

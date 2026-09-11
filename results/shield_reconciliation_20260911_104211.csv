@@ -1,0 +1,8 @@
+timestamp,priority,prompt_tokens_estimated,output_tokens_estimated,total_estimated,prompt_tokens_actual,completion_tokens_actual,total_actual,signed_error,relative_error_pct
+2026-09-11T06:47:14.628339+00:00,legitimate,8,30,38,7,30,37,-1,-2.63
+2026-09-11T06:47:17.377100+00:00,legitimate,8,30,38,7,30,37,-1,-2.63
+2026-09-11T06:47:22.814813+00:00,legitimate,8,30,38,7,30,37,-1,-2.63
+2026-09-11T06:47:24.922819+00:00,legitimate,8,30,38,7,30,37,-1,-2.63
+2026-09-11T06:47:31.304911+00:00,legitimate,8,30,38,7,30,37,-1,-2.63
+2026-09-11T06:47:33.998493+00:00,legitimate,8,30,38,7,30,37,-1,-2.63
+2026-09-11T06:47:39.056599+00:00,legitimate,8,30,38,7,30,37,-1,-2.63

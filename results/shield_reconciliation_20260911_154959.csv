@@ -1,0 +1,5 @@
+timestamp,priority,prompt_tokens_estimated,output_tokens_estimated,total_estimated,prompt_tokens_actual,completion_tokens_actual,total_actual,signed_error,relative_error_pct
+2026-09-11T11:52:24.151773+00:00,legitimate,8,30,38,7,30,37,-1,-2.63
+2026-09-11T11:52:30.241806+00:00,legitimate,8,30,38,7,30,37,-1,-2.63
+2026-09-11T11:54:24.628183+00:00,legitimate,1376,512,1888,1377,512,1889,1,0.05
+2026-09-11T11:54:33.820848+00:00,legitimate,1376,512,1888,1377,512,1889,1,0.05

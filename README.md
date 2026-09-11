@@ -6,64 +6,18 @@ A defensive prototype for hardening LLM inference services against availability 
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Load Generator Machine (k6 / Locust)                               │
-│ Reads LLAMA_SERVER_URL or shield URL from env                      │
-│                                                                     │
-│   ┌─────────────────────────────────┐                              │
-│   │ k6 (4 load profiles +           │                              │
-│   │    legitimate probe cohort)      │                              │
-│   │ Locust (multi-cohort scenarios)  │                              │
-│   └──────────────┬──────────────────┘                              │
-│                  │ (HTTP traffic)                                   │
-└──────────────────┼──────────────────────────────────────────────────┘
-                   │
-                   ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ Shield Proxy (FastAPI)                                             │
-│ Reads LLAMA_SERVER_URL from env (points to llama-server)           │
-│                                                                    │
-│   ┌──────────────────────────────────────────────────────────────┐ │
-│   │ Token-bucket admission control                               │ │
-│   │ Queue-aware load shedding (llamacpp:requests_deferred,       │ │
-│   │   /slots?fail_on_no_slot=1)                                  │ │
-│   │ Priority-tiered fair queuing                                 │ │
-│   └────────────────┬─────────────────────────────────────────────┘ │
-│                    │ (forwarded HTTP)                              │
-└────────────────────┼───────────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ llama-server (--metrics flag enabled)                               │
-│ Reads model from disk; exposes Prometheus text metrics at           │
-│ /metrics endpoint                                                   │
-│                                                                     │
-│   Key metrics:                                                      │
-│   - llamacpp:requests_deferred (queue depth)                        │
-│   - llamacpp:slots_* (slot usage)                                   │
-│   - llamacpp:prompt_tokens_* (processing metrics)                   │ 
-│                                                                     │
-│   Config: --metrics -np/-t/-c flags pinned in service/start.sh      │
-└────────────────────┬────────────────────────────────────────────────┘
-                     │
-                     ▼
-            (Prometheus text format)
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ Analysis Scripts (Python)                                           │
-│                                                                     │
-│   - Bootstrap CI for latency percentiles                            │
-│   - Wilson CI for proportions (error rates, success %)              │
-│   - Chart generation from raw CSVs                                  │
-│   - Session drift & thermal-drift detection                         │
-│   - Cross-session consistency checks                                │
-└─────────────────────────────────────────────────────────────────────┘
+The system is a four-stage pipeline: a load generator, a shield proxy, the inference server, and an offline analysis layer. Traffic flows left to right; metrics flow back the other way.
 
-Results stored in /results/*.csv (gitignored except .gitkeep)
-Session metadata: date, host, generator, recorded metrics
-```
+1. **Load Generator**: Runs on its own machine and reads the target URL from LLAMA_SERVER_URL, pointing either at the shield (normal runs) or directly at llama-server (baseline runs). k6 produces the four load profiles and the legitimate probe cohort using open-model arrival-rate executors, so offered load does not silently back off when the server slows. Locust handles multi-cohort scenarios where a legitimate user class and a heavy attacker class share one timeline.
+
+2. **Shield Proxy (FastAPI)**: The defensive core. It reads LLAMA_SERVER_URL pointing at llama-server and applies three policies in order: token-bucket admission control (charging estimated input plus weighted output tokens, not a flat request count, with fast 429 and Retry-After when over budget); queue-aware shedding (watching llamacpp:requests_deferred and /slots?fail_on_no_slot=1 and rejecting low-priority requests before they pile up); and priority-tiered fair queuing (a reserved share for interactive traffic, plus wait-time aging so low-priority requests cannot starve). Admitted requests are forwarded as ordinary HTTP.
+
+3. **llama-server**: Started with --metrics enabled, which is required for the Prometheus endpoint to exist. Reads the model from disk and exposes an OpenAI-compatible API. Its config is pinned in service/start.sh; the knobs that matter are -np (slots), -t/-tb (threads), and -c (context), set low so the server saturates at single-digit requests per second. Two observability surfaces feed the shield and analysis: /metrics (carrying llamacpp:requests_deferred, the llamacpp:slots_* family, and llamacpp:prompt_tokens_*) and /slots, which returns 503 under fail_on_no_slot=1 when no slot is free. These are the CPU-stack substitute for the KV-cache metric GPU gateways use.
+
+4. **Analysis Scripts (Python)**: Run offline after each session. They compute bootstrap confidence intervals for latency percentiles, Wilson intervals for proportions (error rate, legitimate-cohort survival, false-positive rate), generate charts from raw CSVs, and detect session drift, thermal drift, and cross-session inconsistency so run-order effects stay visible.
+
+5. **Data flow and storage**: Traffic goes generator → shield → llama-server; metrics are scraped from /metrics and written to per-run CSVs. Results live in /results/*.csv, gitignored except for .gitkeep. Each session records metadata alongside its data: date, host, generator, and captured metrics, so any figure in the report traces back to a specific reproducible run.
+
 
 ## Quick Start
 

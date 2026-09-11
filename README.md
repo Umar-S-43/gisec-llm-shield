@@ -1,4 +1,16 @@
-# LLM Inference Service Availability Defense Prototype
+<div align="center">
+
+# 🛡️ LLM Shield
+
+### Hardening LLM Inference Against Availability Attacks
+
+![OWASP](https://img.shields.io/badge/OWASP-LLM10%3A2025-critical?style=for-the-badge&color=red)
+![Hackathon](https://img.shields.io/badge/GISEC-4--Day%20Hackathon-blueviolet?style=for-the-badge)
+![CPU-Only](https://img.shields.io/badge/CPU--Only-No%20GPU-orange?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Shield-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+
+</div>
 
 A defensive prototype for hardening LLM inference services against availability and DoS stress (OWASP LLM10:2025). Built on [llama.cpp](https://github.com/ggerganov/llama.cpp) (llama-server), running CPU-only on laptops. Server and load-generator laptops connect over the same network during scheduled sessions.
 

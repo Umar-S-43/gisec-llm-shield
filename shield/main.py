@@ -50,7 +50,19 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic_settings import BaseSettings
 
-logging.basicConfig(level=logging.INFO)
+# Log to both the console (as before) and a real file on disk (shield/shield.log,
+# gitignored -- runtime state, not a result artifact). The console-only setup
+# made "watch the Shield live" mean "read a background task's captured stdout,"
+# which only the process that launched it could see. A real file lets anyone
+# (a separate terminal, a PowerShell dashboard, another teammate) tail it too.
+_LOG_FILE_PATH = Path(__file__).parent / "shield.log"
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(_LOG_FILE_PATH, encoding="utf-8"),
+    ],
+)
 logger = logging.getLogger(__name__)
 
 
@@ -527,4 +539,11 @@ if __name__ == "__main__":
     import uvicorn
     logger.info(f"Starting Shield proxy on port {settings.shield_port}")
     logger.info(f"Forwarding to llama-server at {settings.llama_server_url}")
-    uvicorn.run(app, host="0.0.0.0", port=settings.shield_port)
+    # log_config=None: without this, uvicorn.run() applies its own internal
+    # dictConfig and installs handlers directly on the "uvicorn"/"uvicorn.access"
+    # loggers, which silently bypasses the basicConfig handlers set up above --
+    # verified empirically (access lines with response codes were missing from
+    # shield.log until this was added). With log_config=None, uvicorn's loggers
+    # fall back to Python's default propagate=True and inherit our two handlers
+    # (console + file) instead.
+    uvicorn.run(app, host="0.0.0.0", port=settings.shield_port, log_config=None)

@@ -41,6 +41,9 @@ node_modules/
 package-lock.json
 yarn.lock
 
+# Shield runtime log (real-time process state, not a result artifact)
+shield/shield.log
+
 # Results and data (keep .gitkeep only) — includes nested comparison run dirs
 results/*.csv
 results/*.json

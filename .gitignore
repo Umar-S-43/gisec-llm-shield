@@ -34,7 +34,6 @@ wheels/
 *.swp
 *.swo
 *~
-.DS_Store
 
 # Node (for k6 helper scripts if any)
 node_modules/
@@ -49,40 +48,17 @@ results/**/*.json
 results/**/*.log
 !results/.gitkeep
 
-# Model weights (never commit large model files)
-*.gguf
-models/*.gguf
-
-# MacOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-
-
-
-
-
-##########################
-# llama.cpp binaries
-llama/
-*.exe
-*.dll
-
-# Models
-models/
+# Model weights — never commit large model files. service/download_model.py is
+# the documented setup step (see service/README.md); a 1GB+ .gguf would be
+# rejected outright by GitHub's 100MB per-file push limit anyway.
 *.gguf
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pycache/
-
-# IDE
-.vscode/
-.idea/
+# llama.cpp binaries: llama/llama-server.exe (and its sibling DLLs) ARE committed
+# on purpose so a judging checkout can run the demo without a separate llama.cpp
+# build step. Do not re-add *.exe / *.dll / llama/ blanket rules here.
 
 # OS
 .DS_Store
+.AppleDouble
+.LSOverride
 Thumbs.db

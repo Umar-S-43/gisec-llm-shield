@@ -426,7 +426,6 @@ HTML_PAGE = r"""<!doctype html>
 
   <div class="badges">
     <div class="badge"><span id="dotShield" class="dot"></span><span id="txtShield">Shield: checking...</span></div>
-    <div class="badge"><span id="dotLlama" class="dot"></span><span id="txtLlama">llama-server: checking...</span></div>
     <div class="badge"><span id="dotQueue" class="dot"></span><span id="txtQueue">queue: --</span></div>
   </div>
 
@@ -612,10 +611,6 @@ async function tick(){
   const dotShield = document.getElementById('dotShield');
   dotShield.className = 'dot ' + (d.shield.up ? '-up' : '-down');
   document.getElementById('txtShield').textContent = 'Shield: ' + (d.shield.up ? 'UP' : 'DOWN');
-
-  const dotLlama = document.getElementById('dotLlama');
-  dotLlama.className = 'dot ' + (d.llama_server.up ? '-up' : '-down');
-  document.getElementById('txtLlama').textContent = 'llama-server: ' + (d.llama_server.up ? 'UP' : 'DOWN');
 
   const dq = d.llama_server.requests_deferred;
   const dotQueue = document.getElementById('dotQueue');

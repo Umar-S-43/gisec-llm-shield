@@ -103,16 +103,6 @@ See [/analysis/README.md](/analysis/README.md) for available scripts and report 
 └── docs/                  # Architecture, evaluation protocol, session log, reports
 ```
 
-## Session Log
-
-| Date | Host Machine | Load Generator | What Ran | Notes |
-|------|--------------|---|---|---|
-| 2026-09-08 | laptop-a (admin) | laptop-b | Baseline k6 run | Established test harness |
-| | | | | |
-| | | | | |
-
-Update this table as you run experiments. Include date, which laptop hosted the server, which generated load, and what metrics were recorded.
-
 ## Key Constraints & Assumptions
 
 - **Ephemeral connectivity:** Server and load generator connect via phone hotspot; no fixed IPs or persistent connections.

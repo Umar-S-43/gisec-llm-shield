@@ -648,11 +648,21 @@ generous threshold for this CPU-only, $\approx$6--7-second-typical setup):
     \item No valid measurement of \texttt{LEGITIMATE\_SLOT\_FRACTION} $=0.75$
     exists after the dashboard-caching bug was fixed; if a value between the
     default and 1.0 is needed, it must be freshly measured.
-    \item \texttt{service/start.sh} was never updated in the repository with
-    two fixes applied manually on the host machine each session
-    (\texttt{--host 0.0.0.0}, and the short-form \texttt{-np} flag required
-    by the local \texttt{llama-server} build) --- anyone re-running this
-    project from a fresh checkout will hit both issues again.
+    \item \emph{Resolved during report preparation:} \texttt{service/start.sh}'s
+    two launch bugs (\texttt{--host 0.0.0.0} never passed, and the invalid
+    long-form \texttt{--np} flag) were fixed and merged as this report was
+    being finalized. The same merge also identified that \texttt{-c}/
+    \texttt{--ctx-size} is \texttt{llama-server}'s \emph{total} context,
+    divided evenly across \texttt{-np} slots -- confirmed empirically
+    (\texttt{--parallel 4 --ctx-size 2048} yields 512 tokens per slot, not
+    2048) -- meaning the per-slot context available during this project's
+    live sessions was smaller than the flat configured value implied. This
+    does \emph{not} affect any result reported here: every recorded Profile D
+    attack request was rejected by the Shield before being forwarded to
+    \texttt{llama-server} at all (Section~\ref{sec:profiled}), and every
+    legitimate probe request is far too small for context sizing to matter.
+    It would matter for a future test that admits and forwards a
+    large-but-under-budget request.
     \item The per-identity concurrency cap uses source IP as an identity
     proxy; it is not effective against a genuinely distributed attacker
     controlling many real IP addresses, a threat model outside this

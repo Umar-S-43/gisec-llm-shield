@@ -11,21 +11,42 @@ count. This is what catches Profile D (`/loadgen/profiles/profile-d.js`): few
 requests/sec, each one huge. Legitimate and default traffic draw from separate cost
 budgets.
 
-**Known, accepted tradeoff of checking A first:** the token bucket deducts on success
-with no refund path. A request that passes the cost check but is then shed by C or B
-below has already spent real budget for nothing it ever got to use — under sustained
-load, this drains the bucket faster than the previous B → C → A order did, purely
-from requests that never reach `llama-server`. Chosen deliberately anyway, so cost is
-always the first thing evaluated.
+**Bucket deduction is immediate on success (`consume()`), not deferred** — necessary
+because on an async event loop many requests can be mid-pipeline at once, and a
+peek-only check would let two concurrent requests each see enough budget for
+themselves while jointly overspending it (a time-of-check-to-time-of-use race).
+Every downstream rejection point in C and B below calls `bucket.refund(cost)`, so
+the bucket is only ever actually spent, net, on requests that make it all the way
+to `llama-server` — a request shed later doesn't lose its budget permanently.
 
-**2. (C, concurrency layer) Fixed-fraction slot reservation** — caps how many
-requests per tier may be **in-flight** (forwarded, awaiting response) at once. A
-fraction of `TOTAL_LLAMA_SLOTS` (`LEGITIMATE_SLOT_FRACTION`, default 0.5) is reserved
-exclusively for `X-Priority: legitimate` traffic; default-tier traffic is capped to
-the remaining share and cannot use the reserved portion even when it's idle. This is
-independent of the token buckets above — it gates *concurrency*, not *admission
-rate/cost*. Returns `503 {"reason": "..._capacity_..."}` when a tier is full, without
-touching either bucket.
+**2. (C, concurrency layer) Two independent fairness checks, both must pass:**
+
+- **Fixed-fraction slot reservation** — caps how many requests per *tier* may be
+  **in-flight** at once. A fraction of `TOTAL_LLAMA_SLOTS` (`LEGITIMATE_SLOT_FRACTION`,
+  default 0.5) is reserved exclusively for `X-Priority: legitimate` traffic;
+  default-tier traffic is capped to the remaining share and cannot use the reserved
+  portion even when it's idle.
+- **Per-identity concurrency cap** (added 2026-09-11, `PER_IDENTITY_CONCURRENCY_CAP`,
+  default 2) — caps how many in-flight requests a single *source IP* may have, full
+  stop, regardless of claimed tier. Added after a live test set `LEGITIMATE_SLOT_FRACTION=1.0`
+  (simulating an attacker who holds many accounts that all legitimately carry
+  `X-Priority: legitimate`) and confirmed the tier check above provides **zero**
+  protection in that case — every rejection came from raw concurrency exhaustion,
+  not the tier check, because there was no "default" tier left to separate anyone
+  from. This check trusts no claimed identity at all, so an attacker now needs many
+  distinct *IPs* in addition to many accounts to get the same effect — raising the
+  cost of the attack on a second, independent axis.
+  **Known limitation, stated explicitly:** source IP is a practical stand-in for
+  "identity" since this prototype has no real per-user API key system. Reasonable
+  for a single-machine attacker (what this project's load tests actually simulate),
+  but does not fully solve a genuinely distributed attacker with many real IPs
+  (botnet, rented proxy pool, many cloud VMs) — that needs additional layers
+  (per-account keys, an upstream CDN/edge DDoS layer) a single reverse-proxy Shield
+  can't provide alone.
+
+Both checks are independent of the token buckets above — they gate *concurrency*,
+not *admission rate/cost*. Either one returns `503` when tripped, without touching
+either bucket beyond the refund already described.
 
 Deliberately **not implemented**: wait-time aging (a long-waiting default-tier
 request gradually earning priority). This is a stated cut per CLAUDE.md's cut list —
@@ -129,6 +150,7 @@ curl -X POST http://localhost:9090/completion \
 | `DEFERRED_SHED_THRESHOLD_DEFAULT` / `_LEGITIMATE` | 2 / 8 | `llamacpp:requests_deferred` shedding thresholds |
 | `TOTAL_LLAMA_SLOTS` | 4 | **Must match** `service/start.sh`'s `-np`/`NUM_PARALLEL`. Not auto-detected. |
 | `LEGITIMATE_SLOT_FRACTION` | 0.5 | Fraction of `TOTAL_LLAMA_SLOTS` reserved for legitimate-tier in-flight requests |
+| `PER_IDENTITY_CONCURRENCY_CAP` | 2 | Max in-flight requests per source IP, regardless of claimed tier — see known limitation above |
 | `SLOT_CHECK_TTL` | 0.5 | Cache TTL (seconds) for the `/slots` availability check — see `docs/MANUAL_CONFIG.md`. Performance fix, **unverified** as of introduction; tune once real rerun data exists. |
 
 Cost units are ~tokens: prompt word-count/0.75 + `n_predict`/`max_tokens` (defaults to

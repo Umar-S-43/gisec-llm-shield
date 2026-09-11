@@ -12,16 +12,26 @@ Defense mechanisms (see CLAUDE.md), applied at RUNTIME in this order: A -> C -> 
      Legitimate and default traffic draw from separate token buckets. This budget
      check is what catches Profile D (few requests/sec, each one huge) that a plain
      request-counter misses.
-     KNOWN TRADEOFF: TokenBucket.consume() deducts on success with no refund path.
-     A request that passes this check but is then shed by C or B below has already
-     spent real budget for nothing it got to use — under sustained load this drains
-     the bucket faster than the previous order did. Accepted deliberately so cost is
-     always evaluated first.
-  2. (C, concurrency layer) Fixed-fraction slot reservation — caps how many
-     requests per TIER may be in-flight (forwarded, awaiting response) at once,
-     independent of the token buckets above. Reserves a fraction of
-     TOTAL_LLAMA_SLOTS exclusively for legitimate-tier traffic so attack traffic
-     cannot fill every slot even if it has token budget left to spend.
+     TokenBucket.consume() deducts on success immediately, not just checks — needed
+     to prevent a time-of-check-to-time-of-use race between concurrent requests.
+     bucket.refund(cost) is called at every downstream rejection point in C and B
+     below, so budget is only ever actually spent, net, on requests that reach
+     llama-server.
+  2. (C, concurrency layer) TWO independent fairness checks, both must pass:
+     a. Fixed-fraction slot reservation — caps how many requests per TIER may be
+        in-flight at once. Reserves a fraction of TOTAL_LLAMA_SLOTS exclusively for
+        legitimate-tier traffic so attack traffic cannot fill every slot even if it
+        has token budget left to spend.
+     b. Per-identity concurrency cap (added 2026-09-11, PER_IDENTITY_CONCURRENCY_CAP,
+        default 2) — caps in-flight requests per SOURCE IP, trusting no claimed tier
+        at all. Added after a live test (LEGITIMATE_SLOT_FRACTION=1.0, simulating an
+        attacker with many accounts that all legitimately claim the legitimate tier)
+        showed check (a) provides ZERO protection once every requester shares one
+        tier — confirmed live, every rejection in that test was raw concurrency
+        exhaustion, not the tier check. KNOWN LIMITATION: source IP is a practical
+        identity proxy, not a real per-account key system — reasonable against a
+        single-machine attacker, not a fully solved answer to a genuinely
+        distributed attacker with many real IPs.
   3. (B) Queue-aware shedding — checked LAST now. Watches llamacpp:requests_deferred
      (scraped from llama-server's own /metrics) and short-circuits with 503 before
      the real server's queue backs up, using /slots?fail_on_no_slot=1 as the
@@ -99,6 +109,34 @@ class Settings(BaseSettings):
     total_llama_slots: int = 4  # matches service/start.sh's own NUM_PARALLEL default
     legitimate_slot_fraction: float = 0.5  # fraction of total_llama_slots reserved for legitimate tier
 
+    # Per-identity concurrency cap (added 2026-09-11) — a SEPARATE fairness check
+    # from the tier-based slot reservation above. Motivation: the tier check only
+    # protects "legitimate" traffic from "default" traffic, and relies entirely on
+    # the X-Priority header being honest. If an attacker can obtain many accounts
+    # that all legitimately carry X-Priority: legitimate (e.g. LEGITIMATE_SLOT_FRACTION
+    # was set to 1.0 to test exactly this), the tier check provides ZERO protection —
+    # confirmed live: every rejection in that test came from raw concurrency
+    # exhaustion (>=4 in flight), not the tier check, because there was no longer
+    # a "default" tier to separate anyone from.
+    #
+    # This check doesn't trust ANY claimed identity/tier at all. It caps how many
+    # concurrent in-flight requests a single SOURCE IP may have, full stop,
+    # regardless of what priority header it claims. An attacker with many accounts
+    # now needs many DISTINCT IPs too, not just many accounts — raising the cost
+    # of the attack on a second, independent axis instead of relying solely on
+    # account-level trust.
+    #
+    # KNOWN LIMITATION, stated explicitly rather than hidden: this uses source IP
+    # as a practical stand-in for "identity," since this prototype has no real
+    # per-user API key system. That's a reasonable proxy for a single-machine
+    # attacker (which is what this project's load tests actually simulate), but
+    # it does NOT fully solve a genuinely distributed attacker with many real IPs
+    # (botnet, rented proxy pool, many cloud VMs) -- that threat needs additional
+    # layers (per-account keys, an upstream CDN/edge DDoS layer) this single
+    # reverse-proxy Shield can't provide alone. Documented as an explicit known
+    # limitation, not a claimed complete solution.
+    per_identity_concurrency_cap: int = 2
+
     metrics_poll_timeout: float = 2.0
 
     # Cache TTL for slot_available()'s /slots?fail_on_no_slot=1 result — see
@@ -157,6 +195,13 @@ logger.info(
 # only ever mutated by non-yielding `+= 1` / `-= 1` statements, so there's no
 # interleaving hazard between the increment, the check, and the decrement.
 _in_flight = {"legitimate": 0, "default": 0}
+
+# Per-source-IP in-flight counters, for the per-identity concurrency cap (see
+# Settings.per_identity_concurrency_cap). Same interleaving-safety reasoning as
+# _in_flight above. Keys are deleted once a count returns to 0 (in the decrement
+# path below) rather than left at 0 forever, so this doesn't grow unbounded over
+# a long session with many distinct clients.
+_in_flight_by_identity: dict[str, int] = {}
 
 app = FastAPI(title="Shield Proxy")
 
@@ -395,6 +440,10 @@ def _log_reconciliation(priority: bool, prompt_cost: int, output_cost: int, resp
 async def forward_request(request: Request) -> JSONResponse:
     body = await request.body()
     priority = is_priority_request(request)
+    # Source IP, used only by the per-identity concurrency cap below (Defense C,
+    # identity-fairness sub-check) — see Settings.per_identity_concurrency_cap for
+    # why this exists and its known IP-as-identity-proxy limitation.
+    client_id = request.client.host if request.client else "unknown"
 
     if not settings.shield_active:
         # Day-1 / defense-off mode: pass everything through, just log. No cost was
@@ -464,6 +513,24 @@ async def forward_request(request: Request) -> JSONResponse:
                 status_code=503,
             )
 
+    # (C, identity-fairness sub-check) Per-source-IP concurrency cap. Trusts NO
+    # claimed tier/identity at all -- this is what still protects real users when
+    # an attacker holds many accounts that all legitimately carry X-Priority:
+    # legitimate (confirmed live: with LEGITIMATE_SLOT_FRACTION=1.0, the tier
+    # check above provides zero protection, since there's no "default" tier left
+    # to separate anyone from). See Settings.per_identity_concurrency_cap for the
+    # known source-IP-as-identity-proxy limitation.
+    if _in_flight_by_identity.get(client_id, 0) >= settings.per_identity_concurrency_cap:
+        bucket.refund(cost)
+        logger.warning(
+            f"Per-identity concurrency cap: client={client_id} in_flight={_in_flight_by_identity.get(client_id, 0)} "
+            f">= cap={settings.per_identity_concurrency_cap}; shedding (refunded cost={cost})"
+        )
+        return JSONResponse(
+            {"error": "Per-identity concurrency cap exceeded", "reason": "per_identity_in_flight_at_cap"},
+            status_code=503,
+        )
+
     # (B) Queue-aware shedding -- checked last now. Check the deferred gauge
     # first (cheap, cached), fall back to the authoritative /slots check only
     # when it looks tight.
@@ -482,16 +549,24 @@ async def forward_request(request: Request) -> JSONResponse:
         logger.warning(f"No slot available on llama-server (priority={priority}); shedding (refunded cost={cost})")
         return JSONResponse({"error": "No slots available"}, status_code=503)
 
-    # Admitted — forward, tracking in-flight count for the slot-reservation check
-    # above. Incremented right before the call, decremented in `finally` so the
-    # count can never leak upward whether the forward succeeds, errors internally
-    # (caught inside _do_forward), or raises unexpectedly.
+    # Admitted — forward, tracking in-flight counts for both the tier-based and
+    # per-identity concurrency checks above. Incremented right before the call,
+    # decremented in `finally` so the counts can never leak upward whether the
+    # forward succeeds, errors internally (caught inside _do_forward), or raises
+    # unexpectedly.
     tier_key = "legitimate" if priority else "default"
     _in_flight[tier_key] += 1
+    _in_flight_by_identity[client_id] = _in_flight_by_identity.get(client_id, 0) + 1
     try:
         return await _do_forward(request, body, reconcile=(prompt_cost, output_cost), priority=priority)
     finally:
         _in_flight[tier_key] -= 1
+        _in_flight_by_identity[client_id] -= 1
+        if _in_flight_by_identity[client_id] <= 0:
+            # Delete rather than leave at 0 -- keeps the dict bounded to
+            # currently-active identities instead of growing forever across a
+            # long session with many distinct clients.
+            del _in_flight_by_identity[client_id]
 
 
 async def _do_forward(

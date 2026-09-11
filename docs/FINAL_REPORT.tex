@@ -10,6 +10,8 @@
 \usepackage{listings}
 \usepackage{enumitem}
 \usepackage{caption}
+\usepackage{graphicx}
+\usepackage{float}
 
 \hypersetup{
     colorlinks=true,
@@ -356,6 +358,16 @@ The 90\% confidence intervals for the buggy (10.4--27.5\%) and fixed
 improvement. Every remaining probe failure after the fix was a clean
 \texttt{503} rejection --- no timeouts, no dropped connections.
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig1_defense_evolution.pdf}
+    \caption{Legitimate survival across the full defense-evolution timeline,
+    same 50 req/s sustained-flood attack profile throughout. Error bars are
+    90\% Wilson confidence intervals; the intervals for the buggy and fixed
+    Shield versions do not overlap.}
+    \label{fig:defense-evolution}
+\end{figure}
+
 \subsection{Slot-Reservation Tuning: A Confound, Caught and Corrected}
 \label{sec:fraction}
 
@@ -419,6 +431,16 @@ the attacker pushes harder. Second, raising the reservation fraction to 1.0
 recovers 96.7\% survival while fully blocking the attacker. \textbf{No valid
 measurement of fraction 0.75 exists post-fix}; we report this gap explicitly
 rather than substituting the discarded value.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig2_fraction_sweep.pdf}
+    \caption{Legitimate survival at reservation fraction 0.5 across a 50-fold
+    range in attack rate (blue bars, all post-caching-fix and mutually
+    consistent), against the single confirmed fraction 1.0 reading (dashed
+    line, measured only at 3 req/s).}
+    \label{fig:fraction-sweep}
+\end{figure}
 
 \subsection{Cost-Aware Admission Control: Profile D, Proven Live}
 \label{sec:profiled}
@@ -535,6 +557,17 @@ consistent with, rather than contradictory to, the project's central
 thesis: the identity cap and the token budget are complementary defenses,
 neither alone sufficient.
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig3_spoofing_mitigation.pdf}
+    \caption{The full identity-spoofing story: an unspoofed cost-based attack
+    barely touches the legitimate user (98.4\%); spoofing alone collapses
+    survival (red bars); the per-identity concurrency cap recovers most of
+    it, but only when the legitimate user has a genuinely separate network
+    identity from the attacker (green bars) rather than sharing one (red).}
+    \label{fig:spoofing}
+\end{figure}
+
 \subsection{Economic Framing}
 \label{sec:economics}
 
@@ -568,6 +601,15 @@ substitution, not a claim that a GPU would run this workload at the same
 speed. Self-hosted marginal cost on already-owned hardware is \$0; the
 GPU-rate figures exist only to give the numbers a familiar unit for
 comparison, exactly as instructed by the project's research brief.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/fig4_economics.pdf}
+    \caption{Economic framing formulas on a log scale (values span three
+    orders of magnitude). The two GPU-hour figures are a labeled unit
+    substitution, not a benchmark of actual GPU performance.}
+    \label{fig:economics}
+\end{figure}
 
 \textbf{Goodput} (Phase 4 configuration: sustained flood, 50 req/s, through
 the fixed Shield), defined as completed requests/second meeting an explicit

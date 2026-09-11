@@ -60,6 +60,21 @@ python shield/main.py
 
 Listens on `http://localhost:9090` by default.
 
+**To watch it live in a browser instead of a terminal:**
+
+```bash
+python shield/dashboard_server.py
+# then open http://localhost:8765 (also reachable from other machines on the
+# hotspot at this machine's IP:8765)
+```
+
+Runs on a separate port (8765) alongside the Shield's own 9090. Shows live
+health/queue-depth, cumulative counts of every defense that's fired since the
+Shield started, a colorized log tail, and a Final Report section at the
+bottom (success rate with a Wilson 90% CI, defense-firing breakdown, and cost
+estimate accuracy if a reconciliation CSV exists) — with a "Snapshot" button
+to freeze it at a point in time instead of it continuing to update live.
+
 **For live test sessions, prefer the auto-restarting wrapper instead:**
 
 ```bash
